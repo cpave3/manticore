@@ -1,0 +1,80 @@
+export const API_KEY_PREFIX = 'mc_';
+
+export type ClientResponse = {
+  id: string;
+  name: string;
+  apiKeyPrefix: string;
+  apiKeyMasked: string;
+  createdAt: string;
+  deletedAt: string | null;
+};
+
+export type ClientCreateResponse = ClientResponse & {
+  apiKey: string;
+};
+
+export type UpstreamResponse = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKeyMasked: string | null;
+  headers: Record<string, string> | null;
+  createdAt: string;
+};
+
+export type LogRecordResponse = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  modelId: string;
+  upstreamId: string | null;
+  upstreamName: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+  latencyMs: number;
+  timeToFirstTokenMs: number | null;
+  finishReason: string | null;
+  status: 'success' | 'error' | 'cancelled';
+  statusCode: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+};
+
+export type DashboardSummary = {
+  totalRequests: number;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalTokens: number;
+};
+
+export type DashboardBreakdownRow = {
+  key: string;
+  label: string;
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+};
+
+export type DashboardTimeSeriesPoint = {
+  bucketStart: string;
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+};
+
+export type EventLogResponse = {
+  items: LogRecordResponse[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ApiError = {
+  error: {
+    message: string;
+    type: string;
+    code?: string;
+  };
+};

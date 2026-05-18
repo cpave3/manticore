@@ -1,0 +1,864 @@
+swarm:
+  parent_task_id: "o27hm17z"
+  working_dir: "/home/cameron/Projects/manticore"
+  summary: |
+    Build the Manticore MVP — a self-hosted OpenAI-compatible LLM proxy with
+    per-Client attribution, SQLite-backed request logging, and a React dashboard.
+    Greenfield TypeScript project using Hono, Drizzle + better-sqlite3, Vercel
+    AI SDK, and Vite/React. Decomposed into 4 sequential steps: (1) a single
+    foundation subtask installs deps and lays down the DB schema, config, and
+    shared API contract types so downstream agents have stable imports;
+    (2) four parallel subtasks build self-contained Hono sub-apps and the
+    dashboard frontend on top of that foundation; (3) two parallel subtasks
+    build the dependent routes — dashboard aggregations and the proxy +
+    logging path; (4) one final subtask wires routes into the server, adds
+    the CLI, Dockerfile, README, and a manual end-to-end test.
+
+steps:
+  - name: "Foundation — bootstrap, DB schema, shared contracts"
+    subtasks:
+      - title: "Bootstrap project, DB schema, shared types"
+        role: foundation
+        scope:
+          - package.json
+          - package-lock.json
+          - tsconfig.json
+          - drizzle.config.ts
+          - .gitignore
+          - .env.example
+          - src/db/**
+          - src/config.ts
+          - src/types/**
+          - src/lib/api-key.ts
+          - src/lib/errors.ts
+          - migrations/**
+        prompt: |
+          You are part of a swarm building the Manticore MVP (parent task o27hm17z).
+          You are the FOUNDATION worker — every other agent depends on the files you
+          create, so define them clearly and document any non-obvious choices.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/CONTEXT.md (domain glossary)
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/proposal.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/design.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md (groups 1 & 2)
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/client-management/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/upstream-management/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/request-logging/spec.md
+
+          ## Your deliverables
+
+          ### 1. Project bootstrap
+          - `package.json` with name `manticore`, type `module`, scripts:
+            - `dev`: `tsx watch src/index.ts`
+            - `start`: `node dist/index.js`
+            - `build`: `tsc && (cd dashboard && vite build)`
+            - `dashboard:dev`: `vite --config dashboard/vite.config.ts`
+            - `db:generate`: `drizzle-kit generate`
+            - `db:migrate`: `tsx src/db/migrate.ts`
+            - `cli`: `tsx src/cli.ts`
+          - Use **latest stable** versions of:
+            - Runtime: `hono` ^4, `@hono/node-server` ^2, `ai` ^6, `drizzle-orm` ^0.45,
+              `better-sqlite3` ^12, `zod` ^4, `@huggingface/transformers` (latest),
+              `gpt-tokenizer` (latest)
+            - Dev: `typescript` ^6, `tsx` ^4, `vite` ^8, `@vitejs/plugin-react` ^6,
+              `drizzle-kit` ^0.31, `@types/better-sqlite3` ^7, `@types/node` ^22
+            - Dashboard runtime: `react` ^19, `react-dom` ^19, `@types/react` ^19,
+              `@types/react-dom` ^19
+          - If a version specified above doesn't exist on npm (you can `npm view <pkg> versions --json | tail`),
+            fall back to the latest available major and note it in a comment in package.json.
+          - Run `npm install` once everything is declared. If installation fails because of
+            a version that doesn't exist, adjust and retry — do not leave with a broken install.
+          - `tsconfig.json`: strict, ES2022 target, module NodeNext, moduleResolution NodeNext,
+            outDir `dist`, include `src/**/*`, exclude `dashboard/**`. The dashboard has its own
+            tsconfig owned by another agent.
+          - `.gitignore`: node_modules, dist, *.db, *.db-journal, .env, .env.local,
+            dashboard/dist, dashboard/node_modules
+          - `.env.example` documenting: `MANTICORE_PORT` (default 3456),
+            `MANTICORE_DB_PATH` (default `./manticore.db`), `MANTICORE_LOG_LEVEL` (default `info`).
+
+          ### 2. Database schema (`src/db/schema.ts`)
+          Use `drizzle-orm/sqlite-core`. Three tables:
+          - `clients`: `id` (text PK, e.g. cuid-like — use `crypto.randomUUID()`), `name`
+            (text, not null), `apiKey` (text unique not null), `createdAt` (integer
+            timestamp_ms not null), `deletedAt` (integer timestamp_ms nullable — for
+            soft delete since LogRecords must remain attributed to deleted Clients).
+          - `upstreams`: `id` (text PK), `name` (text unique not null — the provider
+            segment of Model ID), `baseUrl` (text not null), `apiKey` (text nullable),
+            `headers` (text — JSON-serialized object, nullable), `createdAt` (integer
+            timestamp_ms not null).
+          - `logRecords`: `id` (text PK), `clientId` (text not null — references clients.id
+            but no FK cascade; preserve historical attribution), `clientName` (text not
+            null — snapshot of client name at request time), `modelId` (text not null —
+            the full `{provider}/{model-path}`), `upstreamId` (text nullable), `upstreamName`
+            (text nullable — snapshot), `promptTokens` (integer nullable), `completionTokens`
+            (integer nullable), `totalTokens` (integer nullable), `latencyMs` (integer not null),
+            `timeToFirstTokenMs` (integer nullable), `finishReason` (text nullable),
+            `status` (text not null — `success` | `error` | `cancelled`), `statusCode`
+            (integer nullable — HTTP status returned to the client), `errorMessage` (text nullable),
+            `createdAt` (integer timestamp_ms not null).
+          - Add indexes on `logRecords.clientId`, `logRecords.upstreamId`, `logRecords.createdAt`.
+
+          Export TypeScript types via Drizzle's `$inferSelect` / `$inferInsert`.
+
+          ### 3. DB connection (`src/db/client.ts`)
+          - Export a `getDb()` function that opens `better-sqlite3` at the configured
+            path, enables WAL mode (`PRAGMA journal_mode = WAL`) and foreign keys, and
+            returns a Drizzle-wrapped instance typed against the schema.
+          - Singleton — cache the instance.
+
+          ### 4. Migrations (`migrations/` + `src/db/migrate.ts`)
+          - Configure `drizzle.config.ts` to point at `src/db/schema.ts`, dialect `sqlite`,
+            out `./migrations`, dbCredentials from `MANTICORE_DB_PATH` env (default `./manticore.db`).
+          - Run `npx drizzle-kit generate` so an initial migration SQL file lands in `migrations/`.
+          - Write `src/db/migrate.ts` that uses `drizzle-orm/better-sqlite3/migrator` to
+            apply migrations from `./migrations`.
+          - Then **execute the migration** so `manticore.db` is created with all three tables.
+            (Subsequent agents will need a populated schema for testing.)
+
+          ### 5. Shared config (`src/config.ts`)
+          Export a `loadConfig()` function returning a frozen object:
+          ```ts
+          { port: number; dbPath: string; logLevel: 'debug'|'info'|'warn'|'error'; nodeEnv: string }
+          ```
+          Read from process.env with the defaults above. Validate with Zod.
+
+          ### 6. Shared API contract types (`src/types/api.ts`)
+          Other agents will import from here — define the JSON shapes for:
+          - `ClientResponse` (id, name, apiKeyPrefix, apiKeyMasked, createdAt ISO string, deletedAt nullable)
+          - `ClientCreateResponse` extends ClientResponse with the full apiKey (returned once on creation)
+          - `UpstreamResponse` (id, name, baseUrl, apiKeyMasked nullable, headers nullable, createdAt)
+          - `LogRecordResponse` (all logRecord fields with timestamps as ISO strings)
+          - `DashboardSummary` (totalRequests, totalPromptTokens, totalCompletionTokens, totalTokens)
+          - `DashboardBreakdownRow` (key, label, requests, promptTokens, completionTokens, totalTokens) — used by client/model/upstream breakdowns
+          - `DashboardTimeSeriesPoint` (bucketStart ISO, requests, promptTokens, completionTokens)
+          - `EventLogResponse` (items: LogRecordResponse[], total, page, pageSize)
+          - `ApiError` ({ error: { message, type, code? } } — OpenAI-style)
+
+          Also export key prefix constant: `API_KEY_PREFIX = 'mc_'` (used by Client creation).
+
+          ### 7. Helpers
+          - `src/lib/api-key.ts`: `generateApiKey()` returns `mc_${hex}` where hex is 32+ chars
+            (use `crypto.randomBytes(32).toString('hex')`). Also `maskApiKey(key)` returning
+            `mc_...${last4}` and `apiKeyPrefix(key)` returning first 7 chars (e.g. `mc_a1b2`).
+          - `src/lib/errors.ts`: helper to build OpenAI-style error JSON
+            `{ error: { message, type, code? } }` and an `HttpError` class with `status` field.
+
+          ## Out of scope for you
+          - DO NOT create `src/server.ts`, `src/index.ts`, `src/cli.ts`, any `src/routes/*`,
+            any `src/middleware/*`, any `src/services/*` beyond what's listed above,
+            tokenizer code, or any `dashboard/*` files. Those are owned by other agents.
+          - DO NOT install dashboard build deps in a separate package.json — use the root one.
+
+          ## When you're done
+          1. Confirm `npm install` succeeded.
+          2. Confirm `manticore.db` exists and has the three tables (you can run
+             `sqlite3 manticore.db ".schema"` to verify; install sqlite3 CLI if missing,
+             or use a quick `tsx` script).
+          3. Confirm `npx tsc --noEmit` passes against your src files.
+          4. Then run: `legato swarm built $LEGATO_SUBTASK_ID`
+
+  - name: "Core modules — auth/clients, upstreams, tokenizer, dashboard UI"
+    subtasks:
+      - title: "Client management routes + auth middleware"
+        role: backend
+        scope:
+          - src/routes/clients.ts
+          - src/services/clients.ts
+          - src/middleware/auth.ts
+          - src/schemas/clients.ts
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). The foundation
+          step is complete — `src/db/schema.ts`, `src/db/client.ts` (with `getDb()`),
+          `src/types/api.ts`, `src/lib/api-key.ts`, and `src/lib/errors.ts` already
+          exist. Read them before you start so you import the right things.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/client-management/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/proxy-api/spec.md (auth scenarios)
+          - /home/cameron/Projects/manticore/CONTEXT.md (Client definition)
+          - /home/cameron/Projects/manticore/src/db/schema.ts
+          - /home/cameron/Projects/manticore/src/types/api.ts
+          - /home/cameron/Projects/manticore/src/lib/api-key.ts
+
+          ## Deliverables
+
+          ### `src/schemas/clients.ts`
+          Zod 4 schemas:
+          - `createClientBodySchema` — `{ name: string (min 1, max 100) }`
+          - `clientIdParamSchema` — `{ id: string }`
+
+          ### `src/services/clients.ts`
+          Pure functions over the DB (import `getDb()` from `src/db/client.ts`):
+          - `createClient(name): Promise<{ client, apiKey }>` — generate a key with
+            `generateApiKey()`, insert, return the full key alongside the row.
+          - `listClients(): Promise<ClientResponse[]>` — order by createdAt asc,
+            include both active and soft-deleted (the dashboard wants historical
+            visibility, but mark deletedAt). Mask the API key.
+          - `deleteClient(id): Promise<void>` — soft delete: set `deletedAt = now`.
+            Throw an `HttpError(404)` if not found.
+          - `findClientByApiKey(apiKey): Promise<{ id, name } | null>` — used by
+            auth middleware. Returns null for non-existent OR soft-deleted clients.
+
+          Convert DB rows to `ClientResponse` shape (ISO timestamps, masked keys).
+
+          ### `src/middleware/auth.ts`
+          Hono middleware factory `apiKeyAuth()`:
+          - Parses `Authorization: Bearer <key>`.
+          - 401 with OpenAI-style error `{ error: { message: "Missing API key", type: "invalid_request_error" } }`
+            if header missing/malformed.
+          - 401 with `"Invalid API key"` if key doesn't match an active Client.
+          - On success, sets `c.set('client', { id, name })` so downstream handlers can read it.
+
+          ### `src/routes/clients.ts`
+          Export a Hono sub-app (`new Hono()`) with these routes — DO NOT mount it to
+          a parent; that's the wiring agent's job in step 4:
+          - `POST /` — body validated by `createClientBodySchema`. Returns
+            `ClientCreateResponse` (includes full apiKey).
+          - `GET /` — returns `ClientResponse[]`.
+          - `DELETE /:id` — soft delete. Returns 204.
+
+          Use Zod for validation; on failure return 400 with a clear error body.
+
+          Errors should be returned as JSON `{ error: { message, type } }`. Use the
+          `HttpError` class from `src/lib/errors.ts` for thrown errors and catch them
+          at the route boundary.
+
+          ## Out of scope
+          - DO NOT mount your sub-app anywhere. Just export it as default.
+          - DO NOT touch `src/server.ts`, `src/index.ts`, or any other route file.
+          - DO NOT create files outside the scope globs above.
+
+          ## When done
+          Verify `npx tsc --noEmit` passes. Then run:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+      - title: "Upstream management routes + Model ID resolver"
+        role: backend
+        scope:
+          - src/routes/upstreams.ts
+          - src/services/upstreams.ts
+          - src/services/model-id.ts
+          - src/schemas/upstreams.ts
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). The foundation
+          is complete — schema, DB client, shared types, and helpers exist.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/upstream-management/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/proxy-api/spec.md (Model ID routing)
+          - /home/cameron/Projects/manticore/CONTEXT.md (Upstream, Model ID definitions)
+          - /home/cameron/Projects/manticore/src/db/schema.ts
+          - /home/cameron/Projects/manticore/src/types/api.ts
+
+          ## Deliverables
+
+          ### `src/schemas/upstreams.ts`
+          Zod 4 schemas:
+          - `createUpstreamBodySchema`:
+            ```
+            {
+              name: string (min 1, max 64, regex /^[a-z0-9][a-z0-9-_]*$/i — must be a valid path segment),
+              baseUrl: string (url),
+              apiKey: string (optional, nullable),
+              headers: record(string, string) (optional, nullable)
+            }
+            ```
+          - `upstreamIdParamSchema` — `{ id: string }`
+
+          ### `src/services/upstreams.ts`
+          - `createUpstream(input)` — insert row. If a row with the same `name`
+            already exists, throw `HttpError(409, "Upstream name already exists")`.
+            Serialize `headers` as JSON.
+          - `listUpstreams()` — order by createdAt asc. Return `UpstreamResponse[]`
+            with `apiKey` replaced by `apiKeyMasked` (use `maskApiKey` from
+            `src/lib/api-key.ts`; null if no key) and `headers` parsed back to object.
+          - `deleteUpstream(id)` — hard delete (no LogRecord FK so they stay
+            referenced by name only). 404 if not found.
+          - `findUpstreamByName(name)` — returns the raw upstream row (with
+            unmasked apiKey and parsed headers) or null. Used by the proxy.
+
+          ### `src/services/model-id.ts`
+          Pure function `parseModelId(modelId: string): { provider: string; modelPath: string }`:
+          - Splits on the FIRST `/`. Everything before is provider; everything after
+            is modelPath. The modelPath itself may contain further `/` characters
+            (e.g. `mistralai/Mistral-7B`) — keep them.
+          - Throws `HttpError(400, "Invalid model ID: expected '{provider}/{model-path}'")`
+            if there is no `/` or the provider/modelPath segment is empty.
+
+          ### `src/routes/upstreams.ts`
+          Hono sub-app exported as default:
+          - `POST /` — validate, create, return `UpstreamResponse` (masked key).
+          - `GET /` — list.
+          - `DELETE /:id` — delete, return 204.
+
+          OpenAI-style error responses; consistent with the clients route style.
+
+          ## Out of scope
+          - DO NOT mount your sub-app anywhere.
+          - DO NOT modify files outside your scope globs.
+
+          ## When done
+          `npx tsc --noEmit` clean. Then:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+      - title: "Tokenizer module (gpt-tokenizer + Hugging Face)"
+        role: backend
+        scope:
+          - src/tokenizer/**
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). The foundation
+          step is done — `src/types/api.ts` exists and dependencies including
+          `gpt-tokenizer` and `@huggingface/transformers` are installed.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/request-logging/spec.md
+            (token counting requirements + priority fallback)
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md (group 9)
+          - /home/cameron/Projects/manticore/CONTEXT.md (Prompt Token, Completion Token, Tokenizer)
+
+          ## Deliverables
+
+          Create `src/tokenizer/index.ts` (and any internal helpers in `src/tokenizer/`).
+
+          Public API:
+          ```ts
+          // OpenAI ChatCompletion-style message
+          export type ChatMessage = { role: 'system'|'user'|'assistant'|'tool'; content: string | unknown; name?: string }
+
+          export async function countPromptTokens(
+            messages: ChatMessage[],
+            modelId: string   // full Model ID like "ollama/qwen3:9b" — you split on '/'
+          ): Promise<number | null>
+
+          export async function countCompletionTokens(
+            text: string,
+            modelId: string
+          ): Promise<number | null>
+
+          // Used by streaming path to amortize counting across chunks.
+          export async function getStreamCounter(modelId: string):
+            Promise<{ feed(textDelta: string): void; total(): number } | null>
+          ```
+
+          Behaviour:
+          - Split modelId on first `/`. Provider segment is `openai`, `anthropic`, etc.
+          - **gpt-tokenizer path**: for providers `openai` / `azure` / `openrouter` and
+            for model paths starting with `gpt-` / `o1-` / `o3-` / `o4-`, use the
+            `gpt-tokenizer` package (it provides `encode()` for the default cl100k_base
+            encoding plus model-specific encodings via `gpt-tokenizer/model/<name>`).
+            For prompt token counting, apply a simple ChatML-style template: format
+            messages as `<|im_start|>{role}\n{content}<|im_end|>\n` and count tokens
+            of the full string, plus the conventional `<|im_start|>assistant\n` priming.
+            This is a reasonable approximation — exact OpenAI counting requires
+            tiktoken's role/name overhead which varies per model.
+          - **Hugging Face path**: for everything else, load
+            `AutoTokenizer.from_pretrained(hfModelName)` from `@huggingface/transformers`.
+            Map model paths to HF repos with a small lookup table:
+              - `qwen3:*` → `Qwen/Qwen2.5-7B-Instruct` (best-effort approximation)
+              - `qwen2:*` / `qwen2.5:*` → `Qwen/Qwen2.5-7B-Instruct`
+              - `llama3:*` / `llama3.1:*` / `llama-3*` → `meta-llama/Llama-3.1-8B`
+              - `mistral:*` / `mistral-*` → `mistralai/Mistral-7B-Instruct-v0.3`
+              - `gemma:*` / `gemma2:*` → `google/gemma-2-2b-it`
+              - Fallback: use the model path as-is (e.g. for `openrouter/anthropic/claude-3.5-sonnet` use the post-provider portion).
+            Use the tokenizer's `apply_chat_template(messages, { tokenize: true, add_generation_prompt: true })`
+            when the tokenizer supports it; otherwise concatenate message contents.
+          - **Cache** tokenizers in memory keyed by resolved HF repo id. Use a
+            `Map<string, Promise<PreTrainedTokenizer>>` so concurrent calls share
+            a single load.
+          - **Failures must be non-fatal**. If a tokenizer fails to load or encode,
+            log a warning and return `null` so the caller falls back per the priority
+            chain. Do NOT throw.
+
+          Streaming counter:
+          - `getStreamCounter` returns null if no tokenizer is available for the model.
+          - Otherwise returns an object that buffers `feed()` calls and re-tokenizes
+            the accumulated string on `total()`. Simple approach: store the running
+            concatenated text, return its encoded length on `total()`. Document the
+            2-5% overcount trade-off in a brief comment.
+
+          ## Notes
+          - `@huggingface/transformers` HF model downloads can be slow / fail in
+            sandbox environments. Wrap the load in try/catch and emit a clear console
+            warning on failure — the proxy must keep working with null counts.
+          - Set the cache dir (the transformers library reads `HF_HOME` or
+            `TRANSFORMERS_CACHE`) — if neither is set, it defaults to OS-appropriate
+            paths. Don't add any complex config here; defaults are fine.
+
+          ## Out of scope
+          - Do not touch DB, routes, server, dashboard, or any other module.
+
+          ## When done
+          `npx tsc --noEmit` clean. Then:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+      - title: "Dashboard frontend (Vite + React UI)"
+        role: frontend
+        scope:
+          - dashboard/**
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). The foundation
+          step is done — `src/types/api.ts` defines the API contract. Root dependencies
+          (`react`, `react-dom`, `vite`, `@vitejs/plugin-react`, plus their types) are
+          installed in the root `package.json`.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/dashboard/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md (groups 7 & 8)
+          - /home/cameron/Projects/manticore/src/types/api.ts (the API contract you'll consume)
+          - /home/cameron/Projects/manticore/docs/adr/0001-single-user-no-auth.md (no auth on dashboard)
+
+          ## Deliverables
+
+          Create the full Vite + React dashboard under `dashboard/`:
+          ```
+          dashboard/
+            index.html
+            vite.config.ts
+            tsconfig.json           # extends root, includes only dashboard/**
+            src/
+              main.tsx
+              App.tsx
+              api/client.ts         # fetch wrapper, types re-imported from ../../src/types/api
+              components/
+                SummaryCards.tsx
+                BreakdownTable.tsx
+                TimeSeriesChart.tsx
+                EventLogTable.tsx
+                ClientsAdmin.tsx
+                UpstreamsAdmin.tsx
+                RefreshControl.tsx
+              styles.css
+          ```
+
+          ### `vite.config.ts`
+          - Root: this `dashboard` directory.
+          - Plugins: `@vitejs/plugin-react`.
+          - Dev server: port 5173. Proxy `/api` and `/v1` to `http://localhost:3456`
+            (the Manticore API) so dev mode works.
+          - Build outDir: `dashboard/dist` (relative to dashboard/), which the
+            wiring agent will serve via Hono in production.
+
+          ### `dashboard/tsconfig.json`
+          - extends `../tsconfig.json`
+          - compilerOptions.jsx = `react-jsx`
+          - compilerOptions.lib = `["ES2022", "DOM"]`
+          - include `["src/**/*"]` (relative to dashboard/)
+          - module/moduleResolution can stay NodeNext or switch to Bundler — whichever
+            works with `@vitejs/plugin-react` v6.
+
+          ### API client (`src/api/client.ts`)
+          Reuse the API contract types: import via the relative path
+          `../../../src/types/api`. Implement:
+          ```
+          listClients() → ClientResponse[]
+          createClient({ name }) → ClientCreateResponse
+          deleteClient(id) → void
+          listUpstreams() → UpstreamResponse[]
+          createUpstream({ name, baseUrl, apiKey?, headers? }) → UpstreamResponse
+          deleteUpstream(id) → void
+          dashboardSummary() → DashboardSummary
+          dashboardBreakdown('client'|'model'|'upstream') → DashboardBreakdownRow[]
+          dashboardTimeSeries({ bucket: 'hour'|'day' }) → DashboardTimeSeriesPoint[]
+          eventLog({ page, pageSize, sortBy?, sortDir? }) → EventLogResponse
+          ```
+          All endpoints are JSON; throw on non-2xx with the OpenAI-style error message.
+
+          ### UI views
+          Single-page app with tab navigation between:
+          1. **Overview**: SummaryCards (total requests / prompt / completion tokens)
+             + TimeSeriesChart (requests over time) + a row of three BreakdownTables
+             (by Client, by Model, by Upstream).
+          2. **Event Log**: paginated, sortable table of LogRecords.
+          3. **Clients**: list, create form (name only — displays full apiKey
+             once after creation in a "copy me" callout), delete.
+          4. **Upstreams**: list, create form (name, baseUrl, optional apiKey,
+             optional headers as JSON textarea), delete.
+
+          For charts you don't need a chart library — a simple inline SVG bar chart
+          / line chart is fine. Keep dependencies minimal.
+
+          Include a manual refresh button in the header that re-fetches data for the
+          current view, and an optional auto-refresh toggle (30s interval).
+
+          Style with a plain `styles.css` (CSS variables, dark theme acceptable).
+          No external CSS frameworks.
+
+          ### `index.html`
+          Standard Vite scaffolding pointing at `/src/main.tsx`.
+
+          ## Verification
+          - Run `cd dashboard && npx vite build` and confirm it produces `dashboard/dist/`.
+          - Run `npx tsc -p dashboard --noEmit` to typecheck the dashboard.
+
+          ## Out of scope
+          - Do NOT modify anything outside `dashboard/` (vite.config.ts goes inside
+            `dashboard/`, not at the repo root).
+          - Do NOT implement the backend `/api/dashboard/*` endpoints — another agent
+            will. Just write the frontend to call them per the contract types.
+
+          ## When done
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+  - name: "Routes — dashboard backend, proxy + logging"
+    subtasks:
+      - title: "Dashboard backend aggregation endpoints"
+        role: backend
+        scope:
+          - src/routes/dashboard.ts
+          - src/services/aggregations.ts
+          - src/schemas/dashboard.ts
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). Step 1
+          (foundation) and step 2 (core modules) are complete. `src/db/schema.ts`,
+          `src/db/client.ts`, and the API contract types in `src/types/api.ts` exist.
+          The dashboard frontend (in `dashboard/`) is calling specific endpoints that
+          you now need to implement.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/dashboard/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md (group 7)
+          - /home/cameron/Projects/manticore/src/db/schema.ts
+          - /home/cameron/Projects/manticore/src/types/api.ts
+          - /home/cameron/Projects/manticore/dashboard/src/api/client.ts (this is your contract)
+
+          ## Deliverables
+
+          ### `src/schemas/dashboard.ts`
+          Zod query schemas:
+          - `breakdownQuerySchema`: `{ groupBy: 'client'|'model'|'upstream' }`
+          - `timeSeriesQuerySchema`: `{ bucket: 'hour'|'day' (default 'hour') }`
+          - `eventLogQuerySchema`: `{ page: number (default 1, min 1), pageSize: (default 50, max 500), sortBy?: enum of column names, sortDir?: 'asc'|'desc' (default 'desc') }`
+
+          ### `src/services/aggregations.ts`
+          Pure functions using Drizzle queries against `logRecords`:
+          - `summary(): Promise<DashboardSummary>` — count(*) and SUM(promptTokens),
+            SUM(completionTokens), SUM(totalTokens) over all logRecords.
+            Treat null token sums as 0 in the SUM.
+          - `breakdown(groupBy): Promise<DashboardBreakdownRow[]>`:
+            - groupBy='client' → group by clientId, label = clientName.
+            - groupBy='model' → group by modelId, label = modelId.
+            - groupBy='upstream' → group by upstreamName (skip rows where it's null),
+              label = upstreamName.
+            For each group: requests count, sum of promptTokens, completionTokens,
+            totalTokens. Order by totalTokens desc.
+          - `timeSeries(bucket): Promise<DashboardTimeSeriesPoint[]>`:
+            - Bucket `createdAt` to the start of the hour or day. SQLite:
+              `strftime('%Y-%m-%dT%H:00:00Z', createdAt/1000, 'unixepoch')` for hour,
+              `strftime('%Y-%m-%dT00:00:00Z', createdAt/1000, 'unixepoch')` for day.
+              (`createdAt` is stored as ms; divide by 1000.)
+            - Return last 30 days for day bucket, last 24 hours for hour bucket.
+            - Each row: bucketStart (ISO string), requests, promptTokens, completionTokens.
+            - Sort by bucketStart asc.
+          - `eventLog({ page, pageSize, sortBy, sortDir }): Promise<EventLogResponse>`:
+            - Default sortBy = createdAt, sortDir = desc.
+            - Whitelist sortable columns (createdAt, latencyMs, totalTokens, status).
+              Reject any other value (return 400 from the route).
+            - Return items as `LogRecordResponse[]` (ISO timestamps), plus `total`,
+              `page`, `pageSize`.
+
+          ### `src/routes/dashboard.ts`
+          Hono sub-app exported as default:
+          - `GET /summary` → DashboardSummary
+          - `GET /breakdown?groupBy=...` → DashboardBreakdownRow[]
+          - `GET /time-series?bucket=...` → DashboardTimeSeriesPoint[]
+          - `GET /event-log?page=&pageSize=&sortBy=&sortDir=` → EventLogResponse
+
+          Use Zod to validate query params; on failure return 400 with an error body.
+
+          ## Out of scope
+          - Do not mount your sub-app — the wiring agent will under `/api/dashboard`.
+          - Do not touch `src/server.ts`, the dashboard frontend, or any other route.
+
+          ## When done
+          `npx tsc --noEmit` clean. Then:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+      - title: "Proxy endpoint + request logging"
+        role: backend
+        scope:
+          - src/routes/proxy.ts
+          - src/services/proxy.ts
+          - src/services/logging.ts
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). Steps 1 and 2
+          are complete. You can rely on these existing modules:
+          - `src/db/client.ts` (getDb)
+          - `src/db/schema.ts` (logRecords table)
+          - `src/types/api.ts` (ApiError shape)
+          - `src/lib/errors.ts` (HttpError, error helpers)
+          - `src/middleware/auth.ts` (apiKeyAuth middleware — sets c.var.client = { id, name })
+          - `src/services/upstreams.ts` (findUpstreamByName)
+          - `src/services/model-id.ts` (parseModelId)
+          - `src/tokenizer/index.ts` (countPromptTokens, countCompletionTokens, getStreamCounter)
+
+          Read all of these before writing anything.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/proxy-api/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/specs/request-logging/spec.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md (groups 5 & 6)
+          - /home/cameron/Projects/manticore/CONTEXT.md (Request, LogRecord, token counting priority)
+          - /home/cameron/Projects/manticore/src/middleware/auth.ts
+          - /home/cameron/Projects/manticore/src/services/upstreams.ts
+          - /home/cameron/Projects/manticore/src/services/model-id.ts
+          - /home/cameron/Projects/manticore/src/tokenizer/index.ts
+
+          ## Deliverables
+
+          ### `src/services/logging.ts`
+          - `writeLogRecord(input)` — insert one logRecords row. Accepts the
+            full set of fields (some nullable). Generate `id` with `crypto.randomUUID()`.
+          - Helper `buildLogRecord(...)` that takes the in-flight context (clientId,
+            clientName, modelId, upstream, start ts, etc.) and final tally and
+            constructs the row to insert. Errors during write should be logged but
+            NOT throw (logging failures must not break the request response).
+
+          ### `src/services/proxy.ts`
+          The core forwarder. Approach:
+
+          Because we need raw streaming SSE pass-through AND token counting AND
+          structured logging, the Vercel AI SDK's high-level helpers are awkward —
+          they assume you want a typed `ModelMessage[]` round trip. For an
+          OpenAI-compatible proxy, the simplest correct approach is to **fetch the
+          upstream chat completions endpoint directly** while still installing
+          `ai` (used for type re-exports / future extension). Do this:
+
+          - `forward({ upstream, modelPath, requestBody, isStream }): { headers, status, body }`
+          - Build the upstream URL: `${upstream.baseUrl.replace(/\/$/, '')}/chat/completions`
+            (or accept that base URL already includes `/v1` for OpenAI — we treat
+            the `baseUrl` field as the path prefix to which we append `/chat/completions`).
+          - Rewrite `model: modelPath` in the body.
+          - Build headers: `Content-Type: application/json`; if upstream.apiKey,
+            `Authorization: Bearer ${apiKey}`; merge upstream.headers.
+          - Use global `fetch` (Node 22 has it). For streaming, do NOT consume
+            the response body — return it as a ReadableStream so the route can pipe it.
+
+          (Note for future maintainers: the `ai` SDK dep is installed and available
+          for future provider-specific handling, but for v1 we keep it simple with
+          a direct fetch passthrough.)
+
+          ### `src/routes/proxy.ts`
+          Hono sub-app exported as default, mounted at `/v1` by the wiring agent.
+
+          - Apply `apiKeyAuth()` middleware to `/chat/completions`.
+          - `POST /chat/completions`:
+            1. Parse JSON body. If parse fails or `model` is not a string or `messages` is
+               not an array → 400 with `{ error: { message: ..., type: 'invalid_request_error' } }`.
+            2. Resolve client from `c.var.client`.
+            3. `parseModelId(body.model)` — on throw, return 400 from the HttpError.
+            4. `findUpstreamByName(provider)` — null → 404
+               `{ error: { message: "Unknown provider '<name>'", type: 'not_found' } }`,
+               and write a LogRecord with status='error', statusCode=404 before responding.
+            5. Count prompt tokens upfront (best-effort, can be replaced if upstream
+               reports usage later).
+            6. Record `start = Date.now()`.
+            7. Forward via `proxy.forward()`.
+            8. If body.stream === true:
+               - Set response headers from upstream: `Content-Type: text/event-stream`,
+                 `Cache-Control: no-cache`, `Connection: keep-alive`.
+               - Use a `TransformStream` (or `ReadableStream` with custom pull) to
+                 (a) record `timeToFirstTokenMs` on the first chunk passed through,
+                 (b) parse each SSE `data: {...}` line, extract `choices[0].delta.content`,
+                 feed it to a stream counter, also watch for the final `data: [DONE]` or
+                 the chunk with `usage` (some upstreams send usage in a final chunk
+                 if `stream_options: { include_usage: true }`),
+                 (c) on stream completion (either upstream done OR client abort via
+                 `c.req.raw.signal.aborted`), write the LogRecord with the accumulated
+                 counts, total latency, finishReason (from last `finish_reason` seen),
+                 and status='success' (or 'cancelled' if aborted).
+               - Pipe the *raw* upstream bytes through without rewriting (the proxy
+                 should preserve the SSE format exactly).
+               - Return the transformed stream.
+            9. If non-streaming:
+               - Read full upstream JSON.
+               - If upstream responded non-2xx: status='error', record statusCode,
+                 errorMessage, then return the upstream's body and status as-is.
+               - On 2xx: extract `usage.prompt_tokens` / `usage.completion_tokens` /
+                 `usage.total_tokens` if present; otherwise fall back to local
+                 token counts (already have prompt from step 5; count completion
+                 from `choices[0].message.content` via `countCompletionTokens`).
+                 Extract `choices[0].finish_reason`. Write LogRecord. Return JSON.
+
+          Always include:
+          - `latencyMs = Date.now() - start` (final)
+          - `timeToFirstTokenMs` (streaming only — nullable otherwise; OK to record
+            time-to-first-byte for non-streaming too if it's easy).
+          - status: 'success' | 'error' | 'cancelled'.
+          - On any thrown error inside the route, catch, write a failed LogRecord,
+            then return an OpenAI-style 500 error body.
+
+          ### Reject non-chat endpoints
+          Inside this sub-app, also register a catch-all:
+          ```
+          app.all('/embeddings', ...) → 404 with message "Only /v1/chat/completions is supported"
+          app.all('/images/*', ...) → same
+          ```
+          The 404 message must mention chat completions. The wiring agent will
+          mount this whole sub-app at `/v1`.
+
+          (The repo-wide 404 for unknown paths will be handled by the wiring agent —
+          you only need to handle paths *under* `/v1`.)
+
+          ## Out of scope
+          - Do not modify the auth middleware, upstreams service, model-id parser,
+            or tokenizer — call them.
+          - Do not mount the sub-app or touch `src/server.ts`.
+          - Do not write to the dashboard.
+
+          ## When done
+          `npx tsc --noEmit` clean. Then:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+  - name: "Wiring, CLI, Docker, end-to-end verification"
+    subtasks:
+      - title: "Wire server, CLI, Dockerfile, README, run manual test"
+        role: integration
+        scope:
+          - src/server.ts
+          - src/index.ts
+          - src/cli.ts
+          - src/middleware/static.ts
+          - Dockerfile
+          - .dockerignore
+          - README.md
+          - scripts/**
+        prompt: |
+          You are part of the Manticore MVP swarm (parent o27hm17z). You are the
+          final integration agent — all sub-modules exist. Your job is to wire
+          them into a running server, write the CLI, package it for Docker, write
+          a README, and verify end-to-end.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md (groups 10 & 11)
+          - /home/cameron/Projects/manticore/src/routes/clients.ts
+          - /home/cameron/Projects/manticore/src/routes/upstreams.ts
+          - /home/cameron/Projects/manticore/src/routes/dashboard.ts
+          - /home/cameron/Projects/manticore/src/routes/proxy.ts
+          - /home/cameron/Projects/manticore/src/config.ts
+          - /home/cameron/Projects/manticore/CONTEXT.md
+          - /home/cameron/Projects/manticore/docs/adr/0001-single-user-no-auth.md
+
+          ## Deliverables
+
+          ### `src/server.ts`
+          Build and export the Hono app:
+          - `import { Hono } from 'hono'`
+          - Use Hono's logger middleware (or a tiny custom one tied to the config log level).
+          - Use the cors middleware from `hono/cors` with permissive defaults
+            (single-user tool, see ADR-0001).
+          - Mount:
+            - `/api/clients` → routes/clients sub-app
+            - `/api/upstreams` → routes/upstreams sub-app
+            - `/api/dashboard` → routes/dashboard sub-app
+            - `/v1` → routes/proxy sub-app
+          - Serve dashboard static files:
+            - In production (`config.nodeEnv === 'production'` OR `dashboard/dist/index.html` exists):
+              serve files under `dashboard/dist` with `serveStatic` from `@hono/node-server/serve-static`
+              for `/assets/*` and `/` (fall back to index.html for client routes).
+            - In dev (no built dashboard): expose a small message at `/` pointing the
+              user at `npm run dashboard:dev` (the Vite dev server on port 5173).
+          - Catch-all 404: return `{ error: { message: 'Not Found', type: 'not_found' } }`.
+          - Global error handler: log + return 500 OpenAI-style error.
+
+          Export both the app factory and a default instance.
+
+          ### `src/middleware/static.ts`
+          Optional helper for the dashboard serving logic if it clarifies the server file.
+
+          ### `src/index.ts`
+          - `loadConfig()` from `src/config.ts`.
+          - Ensure DB exists by calling `getDb()` (it opens/creates the file).
+          - Run migrations automatically on startup — invoke the migrator from
+            `src/db/migrate.ts` (read it; if it's exported as a function, call it;
+            otherwise wrap it).
+          - Start the server with `@hono/node-server`'s `serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })`.
+            Default to binding 127.0.0.1 (per ADR-0001) but allow `MANTICORE_HOST`
+            env override.
+          - Log a startup banner: port, db path, dashboard URL.
+
+          ### `src/cli.ts`
+          A minimal CLI using only `process.argv` (no commander dep). Subcommands:
+          - `manticore clients create <name>` — print the new client and full API key.
+          - `manticore clients list` — print a table.
+          - `manticore clients delete <id>` — soft-delete.
+          - `manticore upstreams create <name> <baseUrl> [--api-key <key>] [--header k=v ...]`
+          - `manticore upstreams list`
+          - `manticore upstreams delete <id>`
+          - `manticore migrate` — run migrations.
+          - `manticore --help` — usage.
+          Call the service functions directly (they already exist). Output to stdout
+          using simple plain text or `console.table`.
+
+          Add to `package.json`'s `bin` field: `{ "manticore": "./dist/cli.js" }`
+          (you'll need to add a shebang `#!/usr/bin/env node` at the top of cli.ts
+          via tsx-friendly comment OR just instruct README readers to use
+          `npm run cli -- clients create foo`).
+
+          ### `Dockerfile`
+          Multi-stage:
+          1. `node:22-slim` builder: copy package*.json, npm ci, copy sources,
+             `npm run build` (which builds both the server `tsc` output and the
+             dashboard via vite).
+          2. `node:22-slim` runtime: copy `dist/`, `dashboard/dist/`, `migrations/`,
+             `node_modules` (production only — re-install with `npm ci --omit=dev`),
+             and `package.json`. EXPOSE 3456. VOLUME `/data`. Set ENV
+             `MANTICORE_DB_PATH=/data/manticore.db` and `MANTICORE_HOST=0.0.0.0`.
+             CMD `node dist/index.js`.
+          - `.dockerignore` excludes node_modules, dist, dashboard/dist, *.db, .env, .git.
+
+          ### `README.md`
+          Comprehensive but concise. Cover:
+          - What Manticore is (one paragraph, draw from CONTEXT.md / proposal.md)
+          - Quick start: `npm install`, `npm run db:migrate`, `npm run dev`,
+            `npm run dashboard:dev` (in another shell).
+          - Creating a client via CLI + curl example.
+          - Registering an Ollama upstream via CLI + curl.
+          - Making a streaming and non-streaming proxy request with curl.
+          - Opening the dashboard.
+          - Environment variables.
+          - Docker quick start (`docker build`, `docker run`).
+          - Note on no-auth (link the ADR).
+
+          ### `scripts/manual-e2e.ts` (or `.sh`)
+          A tsx-runnable script that:
+          1. Boots the server (or assumes it's running on $MANTICORE_PORT, default 3456).
+          2. POSTs a new client via `/api/clients`.
+          3. POSTs an upstream (Ollama at http://localhost:11434 by default — the
+             script should make the upstream URL/name configurable via env so the
+             user can repoint at any OpenAI-compatible endpoint).
+          4. Hits `/v1/chat/completions` with `stream: false` and prints status + token counts.
+          5. Hits `/v1/chat/completions` with `stream: true`, streams to stdout.
+          6. Fetches `/api/dashboard/summary` and prints it.
+
+          The script must use the client's returned API key in the Authorization
+          header and use a Model ID like `${upstreamName}/${modelPath}` configurable
+          via env (default model: `qwen2.5:0.5b` or similar small Ollama model).
+
+          ## Final verification (DO THESE BEFORE REPORTING BUILT)
+          1. `npx tsc --noEmit` — must pass for src/.
+          2. `npx tsc -p dashboard --noEmit` — must pass for dashboard/.
+          3. `cd dashboard && npx vite build` — must succeed.
+          4. `npm run build` — both server tsc and dashboard build, no errors.
+          5. Start the server in the background (`npm run dev &`), wait ~3s, then:
+             - `curl -s -X POST http://localhost:3456/api/clients -H 'content-type: application/json' -d '{"name":"smoke"}'`
+               — expect 200, capture the apiKey.
+             - `curl -s http://localhost:3456/api/clients` — expect non-empty array.
+             - `curl -s -X POST http://localhost:3456/api/upstreams -H 'content-type: application/json' -d '{"name":"fake","baseUrl":"http://127.0.0.1:1"}'`
+               — expect 200.
+             - `curl -s -X POST http://localhost:3456/v1/chat/completions -H 'content-type: application/json' -H "authorization: Bearer $KEY" -d '{"model":"missing/foo","messages":[{"role":"user","content":"hi"}]}'`
+               — expect 404 with OpenAI-style error.
+             - `curl -s -X POST http://localhost:3456/v1/chat/completions -H 'authorization: Bearer $KEY' -H 'content-type: application/json' -d '{"model":"fake/foo","messages":[{"role":"user","content":"hi"}]}'`
+               — expect 5xx (since baseUrl is bogus) but a LogRecord should still
+               be created with status='error'.
+             - `curl -s http://localhost:3456/api/dashboard/summary` — expect totalRequests >= 2.
+             - `curl -s http://localhost:3456/v1/embeddings -X POST` — expect 404 with
+               "Only /v1/chat/completions" message.
+            Kill the server before reporting built.
+          6. If anything fails, FIX it (you may modify files outside your scope at this
+             integration stage — that's the point — but only if necessary to fix a
+             defect in someone else's code that breaks the system). When in doubt,
+             prefer adjusting your wiring before reaching into others' modules.
+
+          ## When done
+          `legato swarm built $LEGATO_SUBTASK_ID`

@@ -1,0 +1,443 @@
+swarm:
+  parent_task_id: "o27hm17z"
+  working_dir: "/home/cameron/Projects/manticore"
+  summary: |
+    Follow-up swarm: add a real automated test suite (Vitest) covering pure
+    functions, DB services, and HTTP routes including the proxy with mocked
+    upstreams; resolve the duplicate-ADR conflict; mark openspec tasks complete
+    and archive the change. Step 1 installs Vitest, wires the test runner,
+    exposes a test-DB seam, and writes pure-function tests. Step 2 fans out:
+    service tests, route/integration tests (including proxy SSE), and docs
+    cleanup, all running concurrently against disjoint paths.
+
+steps:
+  - name: "Test infrastructure + pure-function tests"
+    subtasks:
+      - title: "Vitest setup, test-DB seam, pure-function unit tests"
+        role: testing
+        scope:
+          - package.json
+          - vitest.config.ts
+          - tests/setup.ts
+          - tests/helpers/**
+          - tests/unit/**
+          - src/db/client.ts
+        prompt: |
+          You are part of a follow-up swarm on the Manticore MVP (parent o27hm17z).
+          The MVP code is complete and works end-to-end; we now need to add an
+          automated test suite. You are the foundation for that — everything in
+          step 2 depends on the test infra you set up.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/README.md
+          - /home/cameron/Projects/manticore/src/db/client.ts
+          - /home/cameron/Projects/manticore/src/config.ts
+          - /home/cameron/Projects/manticore/src/lib/api-key.ts
+          - /home/cameron/Projects/manticore/src/lib/errors.ts
+          - /home/cameron/Projects/manticore/src/services/model-id.ts
+          - /home/cameron/Projects/manticore/src/tokenizer/index.ts
+          - /home/cameron/Projects/manticore/package.json
+          - /home/cameron/Projects/manticore/migrations/
+
+          ## Deliverables
+
+          ### 1. Install Vitest
+          - Add `vitest` (latest stable, ^3 or whatever exists) as a devDependency.
+            Also add `@vitest/coverage-v8` for coverage support.
+          - Add scripts to package.json:
+            - `"test": "vitest run"`
+            - `"test:watch": "vitest"`
+            - `"test:coverage": "vitest run --coverage"`
+          - Run `pnpm install` and confirm it succeeds. (This project uses pnpm — see `packageManager` field in package.json. Do NOT use npm.)
+
+          ### 2. `vitest.config.ts`
+          - Use `defineConfig` from `vitest/config`.
+          - test.environment = `'node'`
+          - test.globals = false (use explicit imports)
+          - test.setupFiles = `['./tests/setup.ts']`
+          - test.include = `['tests/**/*.test.ts']`
+          - test.coverage: provider `v8`, include `src/**`, exclude `src/index.ts`, `src/cli.ts`, `src/db/migrate.ts`.
+          - testTimeout: 15000 (HF tokenizer fallback paths can be slow on cold).
+          - For ESM TS sources with NodeNext, Vitest handles `.js` import suffixes
+            natively — verify by running one test.
+
+          ### 3. Test-DB seam (`src/db/client.ts`)
+          Modify the singleton so tests can inject a fresh DB. Keep the production
+          API unchanged. Add:
+          ```ts
+          export function setDbForTesting(db: ReturnType<typeof drizzle<typeof schema>>): void
+          export function resetDbForTesting(): void
+          ```
+          - `setDbForTesting(db)` overrides the cached instance.
+          - `resetDbForTesting()` clears the cache so the next `getDb()` reopens
+            (used between tests to start fresh).
+          - Both are no-ops in production but documented as test-only.
+
+          Also export the schema namespace from this file (re-export) so tests can
+          access tables via `import { schema } from '../../src/db/client.js'` —
+          OR if that's awkward, tests can import from `src/db/schema.js` directly.
+          (Whichever you prefer; just make sure tests can both query and inject data.)
+
+          ### 4. `tests/setup.ts`
+          Global setup that runs once before all suites:
+          - Set `process.env.MANTICORE_DB_PATH` to a temp file path (use `os.tmpdir()`
+            + a per-run UUID) BEFORE any src/* import.
+          - Set `NODE_ENV` to `'test'` if not already set.
+          - Silence the logger (set `MANTICORE_LOG_LEVEL` to `'error'`).
+
+          ### 5. `tests/helpers/db.ts`
+          Export utilities that route/service tests will use:
+          - `freshDb(): { db, dbPath, cleanup }` — creates a NEW temp SQLite file,
+            opens a `better-sqlite3` connection, applies migrations from
+            `./migrations`, wraps it in Drizzle, calls `setDbForTesting(drizzleInstance)`,
+            and returns the instance plus a cleanup function that closes the
+            connection, calls `resetDbForTesting()`, and deletes the temp file.
+          - `withFreshDb(fn)` — convenience wrapper for tests:
+            ```ts
+            export async function withFreshDb<T>(fn: (db) => Promise<T> | T): Promise<T>
+            ```
+          - Also re-export the schema tables for convenience.
+
+          ### 6. `tests/helpers/factories.ts`
+          Small factories so tests don't repeat insert boilerplate:
+          - `makeClient(db, overrides?)` — inserts a client row, returns the row
+            with the actual apiKey. Default name `"Test Client"`.
+          - `makeUpstream(db, overrides?)` — inserts an upstream row, default name
+            `"test-upstream"`, baseUrl `"http://localhost:9999"`.
+          - `makeLogRecord(db, overrides?)` — inserts a logRecord with sensible defaults.
+          Each accepts a partial override object and uses crypto.randomUUID() for ids.
+
+          ### 7. Unit tests (`tests/unit/**`)
+          Cover the pure functions thoroughly:
+
+          - `tests/unit/api-key.test.ts`:
+            - `generateApiKey()` returns `mc_` prefix and has the right length
+            - Two calls produce different keys
+            - `maskApiKey('mc_abc...xyz')` returns `mc_...<last4>`
+            - `apiKeyPrefix` returns first 7 chars
+            - Edge cases: keys shorter than expected (decide behaviour and assert it)
+
+          - `tests/unit/errors.test.ts`:
+            - `HttpError` carries status/message/type
+            - `HttpError.toJson()` returns the OpenAI-style shape
+            - `buildApiError(message, type, code?)` returns correct shape and includes code only when provided
+
+          - `tests/unit/model-id.test.ts`:
+            - `parseModelId('ollama/qwen3:9b')` returns `{provider:'ollama', modelPath:'qwen3:9b'}`
+            - Multi-segment: `parseModelId('openrouter/anthropic/claude-3.5-sonnet')` keeps everything after the first `/`
+            - `parseModelId('gpt-4o')` (no slash) throws HttpError(400)
+            - `parseModelId('/foo')` (empty provider) throws
+            - `parseModelId('foo/')` (empty path) throws
+            - Verify the error has type `'invalid_request_error'`
+
+          - `tests/unit/tokenizer-gpt.test.ts`:
+            - For modelId `'openai/gpt-4o'`, `countPromptTokens([{role:'user', content:'hello'}], ...)`
+              returns a positive integer (don't assert exact count — tokenizer-dependent)
+            - `countCompletionTokens('hello world', 'openai/gpt-4o')` returns a positive integer
+            - `getStreamCounter('openai/gpt-4o')`: feed two deltas, total() returns > 0
+              and is roughly the sum of separate counts (within a small tolerance)
+            - For an unmappable model that should hit gpt-tokenizer path (e.g.
+              `'openai/o4-mini'`): still returns a positive integer
+            - Do NOT test the HF path here — that requires network access. Skip
+              with a comment.
+
+          ## Verification
+          - `pnpm install` clean.
+          - `pnpm exec tsc --noEmit` passes.
+          - `pnpm test` runs and all your tests pass.
+
+          ## Out of scope
+          - Do NOT write tests for service-level DB code, route handlers, or proxy.
+            Those are owned by other agents in step 2.
+          - Do NOT modify any src/ file other than `src/db/client.ts`.
+          - Do NOT touch openspec/, docs/, or README.
+
+          ## When done
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+  - name: "Service tests, route/integration tests, docs cleanup"
+    subtasks:
+      - title: "Service-level DB tests"
+        role: testing
+        scope:
+          - tests/services/**
+        prompt: |
+          You are part of the Manticore follow-up swarm (parent o27hm17z). Step 1
+          installed Vitest, exposed a test-DB seam (`setDbForTesting` /
+          `resetDbForTesting` in `src/db/client.ts`), wrote `tests/helpers/db.ts`
+          with `freshDb()` / `withFreshDb()`, and `tests/helpers/factories.ts`
+          with `makeClient/makeUpstream/makeLogRecord`.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/tests/helpers/db.ts
+          - /home/cameron/Projects/manticore/tests/helpers/factories.ts
+          - /home/cameron/Projects/manticore/src/services/clients.ts
+          - /home/cameron/Projects/manticore/src/services/upstreams.ts
+          - /home/cameron/Projects/manticore/src/services/logging.ts
+          - /home/cameron/Projects/manticore/src/services/aggregations.ts
+          - /home/cameron/Projects/manticore/src/db/schema.ts
+
+          ## Deliverables — tests under `tests/services/`
+
+          Each test file uses `beforeEach`/`afterEach` (or `withFreshDb`) to set
+          up a fresh DB. Use the factories where they fit.
+
+          ### `tests/services/clients.test.ts`
+          - `createClient('Foo')` inserts a row, returns a response + the full
+            apiKey, key has `mc_` prefix, response has masked + prefix variants.
+          - `createClient` called twice with different names produces two unique
+            api keys.
+          - `listClients()` returns rows ordered by createdAt asc and includes
+            soft-deleted entries (with `deletedAt` set).
+          - `deleteClient(id)` sets `deletedAt` rather than removing the row;
+            the row still appears in `listClients`. Throws HttpError(404) for
+            unknown id.
+          - `findClientByApiKey(key)` returns `{id, name}` for an active client,
+            null for non-existent key, null for soft-deleted client (the spec
+            requires this).
+
+          ### `tests/services/upstreams.test.ts`
+          - `createUpstream({name, baseUrl, apiKey, headers})` persists and returns
+            UpstreamResponse with masked apiKey.
+          - Inserting two upstreams with the same name throws HttpError(409).
+          - `listUpstreams()` returns rows in createdAt order with masked keys
+            and parsed headers.
+          - `deleteUpstream(id)` removes the row; throws 404 for unknown id.
+          - `findUpstreamByName('ollama')` returns the raw row including
+            unmasked apiKey and parsed headers; null for missing.
+
+          ### `tests/services/logging.test.ts`
+          - `buildLogRecord({...})` returns an insert-shaped object with id set,
+            upstream fields snapshotted from the passed upstream (or null when
+            upstream is null), and createdAt = startTime.
+          - `writeLogRecord(input)` inserts a row that's then visible via a raw
+            DB select.
+          - `writeLogRecord` does NOT throw even if insert fails (e.g. pass an
+            obviously bad row and verify it logs but doesn't throw — you can
+            spy on console.error to confirm).
+
+          ### `tests/services/aggregations.test.ts`
+          Seed a deterministic set of log records via the factories (cover multiple
+          clients, models, upstreams, timestamps spanning a couple of hours), then:
+          - `summary()` returns the correct totalRequests / totalPromptTokens /
+            totalCompletionTokens / totalTokens. Null token sums should not
+            count as NaN.
+          - `breakdown('client')`: rows grouped by clientId with correct sums,
+            ordered by totalTokens desc, label = clientName.
+          - `breakdown('model')`: grouped by modelId.
+          - `breakdown('upstream')`: rows where upstreamName is null are excluded.
+          - `timeSeries('hour')`: returns sorted ascending buckets, sums are
+            correct, excludes data older than 24 hours.
+          - `timeSeries('day')`: covers the last 30 days, correct bucket strings.
+          - `eventLog({page:1, pageSize:2})`: returns 2 items, total reflects all,
+            page/pageSize are echoed. Default sort is createdAt desc.
+          - `eventLog({page:1, pageSize:50, sortBy:'latencyMs', sortDir:'asc'})`:
+            sorted by latencyMs ascending.
+
+          ## Out of scope
+          - Do NOT test routes or the proxy here — that's a separate subtask.
+          - Do NOT modify any src/ file.
+          - Stay inside `tests/services/`.
+
+          ## When done
+          Confirm `pnpm test` passes for your suite. Then:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+      - title: "Route + proxy integration tests"
+        role: testing
+        scope:
+          - tests/routes/**
+          - tests/integration/**
+        prompt: |
+          You are part of the Manticore follow-up swarm (parent o27hm17z). Step 1
+          set up Vitest with `setDbForTesting`/`resetDbForTesting`, plus
+          `tests/helpers/db.ts` (`freshDb`, `withFreshDb`) and
+          `tests/helpers/factories.ts` (`makeClient`, `makeUpstream`,
+          `makeLogRecord`).
+
+          You're writing HTTP-level integration tests against the real Hono apps
+          using `app.request(url, init)` — no network. The proxy tests mock
+          `fetch` globally to simulate upstream behaviour.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/src/server.ts
+          - /home/cameron/Projects/manticore/src/routes/clients.ts
+          - /home/cameron/Projects/manticore/src/routes/upstreams.ts
+          - /home/cameron/Projects/manticore/src/routes/dashboard.ts
+          - /home/cameron/Projects/manticore/src/routes/proxy.ts
+          - /home/cameron/Projects/manticore/src/services/proxy.ts
+          - /home/cameron/Projects/manticore/src/middleware/auth.ts
+          - /home/cameron/Projects/manticore/tests/helpers/db.ts
+          - /home/cameron/Projects/manticore/tests/helpers/factories.ts
+
+          ## Approach
+          For each test file:
+          ```ts
+          import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
+          import { withFreshDb } from '../helpers/db'
+          // import the sub-app under test (or createApp from src/server.js for full app)
+          ```
+          Hono apps have `app.request(input, init)` — use that to fire requests
+          and assert on the returned `Response`.
+
+          ## Deliverables
+
+          ### `tests/routes/clients.test.ts` — uses the clients sub-app directly
+          - POST `/` with `{name: 'Foo'}` → 201, body has id/name/apiKey
+          - POST `/` with `{}` → 400 with OpenAI-style error
+          - POST `/` with invalid JSON → 400
+          - GET `/` returns array including created clients
+          - DELETE `/:id` returns 204 and the client appears as soft-deleted in
+            a subsequent GET
+          - DELETE `/:id` for unknown id returns 404 with OpenAI-style error
+
+          ### `tests/routes/upstreams.test.ts` — uses the upstreams sub-app directly
+          - POST `/` with full body → 200/201 (whichever the route returns), body has masked apiKey
+          - POST `/` duplicate name → 409
+          - POST `/` invalid name (with spaces or special chars) → 400 (the regex enforced this)
+          - POST `/` missing baseUrl → 400
+          - GET `/` returns array
+          - DELETE `/:id` works; DELETE missing → 404
+
+          ### `tests/routes/dashboard.test.ts`
+          Seed some logRecords via factories, then through the sub-app:
+          - GET `/summary` returns aggregated counts
+          - GET `/breakdown/client`, `/model`, `/upstream` return arrays
+          - GET `/breakdown/bogus` returns 400 (validation)
+          - GET `/time-series?bucket=hour` returns 200, sorted ascending
+          - GET `/time-series?bucket=junk` returns 400
+          - GET `/events?page=1&pageSize=5` returns items + total
+          - GET `/events?sortBy=garbage` returns 400 (whitelist enforced)
+
+          ### `tests/routes/auth.test.ts`
+          - The middleware rejects requests without `Authorization` header with
+            401 + OpenAI-style error. Test via the proxy app (mount it on a tiny
+            Hono instance OR call proxy app directly).
+          - Rejects malformed `Authorization` (no Bearer)
+          - Rejects valid-format key that doesn't match any client
+          - Rejects key belonging to a SOFT-DELETED client
+          - Accepts valid key for an active client (set up a tiny route after
+            middleware that just returns 200 to verify auth passed; OR use the
+            proxy app and mock fetch to return immediately)
+
+          ### `tests/integration/proxy.test.ts` — the big one
+          Mock `global.fetch` with `vi.spyOn(globalThis, 'fetch')` so the proxy
+          never actually hits the network. Restore between tests.
+
+          - **400 — missing model**: POST `/chat/completions` with a valid
+            auth key but body `{messages: []}` → 400, error type
+            `invalid_request_error`.
+          - **400 — bad model id**: model `'no-slash'` → 400.
+          - **404 — unknown provider**: `provider/foo` where provider isn't
+            registered → 404, **a LogRecord is written** with status=error,
+            statusCode=404 (assert by querying the DB after).
+          - **Non-streaming success**: register upstream `fake` →
+            `http://example.com`. Mock fetch to return a 200 JSON with
+            `usage: {prompt_tokens: 10, completion_tokens: 5, total_tokens: 15}` and
+            `choices: [{message:{content:'hi'}, finish_reason:'stop'}]`. Send
+            non-streaming request. Assert:
+            - Response is 200 JSON
+            - Body matches what upstream returned
+            - LogRecord exists with promptTokens=10, completionTokens=5, totalTokens=15, status='success', upstream snapshot set
+            - The fetch call rewrote `model` to the modelPath
+            - The Manticore Bearer key is NOT forwarded; upstream's apiKey IS
+          - **Non-streaming upstream error**: Mock fetch returns 502 with
+            `{error:{message:'bad gateway'}}`. Assert:
+            - Response status is 502
+            - LogRecord written with status='error', statusCode=502, errorMessage
+              captured
+          - **Non-streaming fetch throws**: Mock fetch to reject. Assert:
+            - Response is 502 with OpenAI-style error
+            - LogRecord written with status='error', statusCode=502
+          - **Streaming success**: Mock fetch to return a Response with a
+            ReadableStream containing 3 SSE chunks (data: {choices:[{delta:{content:'a'}}]}\n\n etc.)
+            and a final chunk with `usage` + finish_reason='stop' + `[DONE]`.
+            Send `{stream: true}`. Assert:
+            - Response Content-Type is text/event-stream
+            - All SSE bytes pass through unchanged (collect them, verify)
+            - After consuming the stream, a LogRecord is eventually written with
+              status='success', the right finish_reason, and token counts from
+              upstream usage (since it included usage)
+          - **Reject /v1/embeddings**: POST `/embeddings` → 404 with message
+            mentioning chat completions.
+
+          For the streaming test, await the stream fully and give the proxy's
+          finalize hook a tick to flush (e.g. `await new Promise(r => setTimeout(r, 50))`)
+          before querying logRecords.
+
+          ## Out of scope
+          - Do NOT test pure functions (api-key, errors, model-id, tokenizer) —
+            those are owned by step 1.
+          - Do NOT test the aggregation services directly — that's a sibling subtask.
+          - Do NOT modify any src/ file.
+
+          ## When done
+          Confirm `pnpm test` passes. Then:
+          `legato swarm built $LEGATO_SUBTASK_ID`
+
+      - title: "Docs cleanup — remove duplicate ADR, tick tasks, archive change"
+        role: docs
+        scope:
+          - docs/adr/0001-multi-user-tenancy.md
+          - openspec/changes/initial-mvp/**
+          - openspec/changes/archive/**
+          - openspec/specs/**
+        prompt: |
+          You are part of the Manticore follow-up swarm (parent o27hm17z). The
+          MVP is built and working; you're cleaning up the documentation state.
+
+          ## Read first
+          - /home/cameron/Projects/manticore/docs/adr/0001-single-user-no-auth.md
+          - /home/cameron/Projects/manticore/docs/adr/0001-multi-user-tenancy.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/tasks.md
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/proposal.md
+          - /home/cameron/Projects/manticore/openspec/config.yaml (if it exists)
+          - /home/cameron/Projects/manticore/openspec/changes/initial-mvp/.openspec.yaml
+
+          ## Deliverables
+
+          ### 1. Delete the conflicting ADR
+          The file `docs/adr/0001-multi-user-tenancy.md` directly contradicts
+          `docs/adr/0001-single-user-no-auth.md` and is not part of the design
+          we built. Delete it. (Just `rm`. It was either accidentally added or
+          stale exploratory material.)
+
+          ### 2. Tick off all task checkboxes
+          In `openspec/changes/initial-mvp/tasks.md`, change every `- [ ]` to
+          `- [x]`. All 64 tasks are complete (verify by spot-checking the code
+          paths if you want, but every group has been implemented and the
+          conductor verified end-to-end).
+
+          ### 3. Archive the openspec change
+          Look at the openspec workflow to figure out the right move. Likely
+          options:
+          - Move the `initial-mvp` directory from `openspec/changes/` to
+            `openspec/changes/archive/initial-mvp/` (preserving subtree).
+          - OR run `openspec archive initial-mvp` if there's a CLI for it
+            (check `openspec --help` via `npx openspec` or similar). If no
+            CLI is installed, just do the directory move.
+          - If the workflow expects specs to be promoted to `openspec/specs/`,
+            do that too (copy the per-capability spec.md files from
+            `openspec/changes/initial-mvp/specs/<cap>/spec.md` to
+            `openspec/specs/<cap>/spec.md`).
+
+          Read `openspec/config.yaml` and any README/AGENTS file inside openspec/
+          first to know the conventions. If you cannot determine the canonical
+          archive path, default to:
+          - Move `openspec/changes/initial-mvp/` → `openspec/changes/archive/initial-mvp/`
+          - Copy each `specs/<cap>/spec.md` to `openspec/specs/<cap>/spec.md`
+          and note what you did in the report.
+
+          ### 4. Quick sanity verification
+          - Confirm the deleted ADR is gone (`ls docs/adr/`)
+          - Confirm tasks.md has 0 unchecked boxes (`grep -c '\[ \]' openspec/changes/initial-mvp/tasks.md || grep -c '\[ \]' openspec/changes/archive/initial-mvp/tasks.md`)
+          - Confirm the change is archived (or otherwise marked done per convention)
+
+          ## Out of scope
+          - Do NOT modify README.md (it's accurate).
+          - Do NOT modify CONTEXT.md.
+          - Do NOT modify any src/ or test files.
+          - Do NOT touch the openspec spec.md content itself; just move/copy files.
+
+          ## When done
+          `legato swarm built $LEGATO_SUBTASK_ID`

@@ -1,0 +1,10 @@
+node_modules
+dist
+dashboard/dist
+*.db
+.env
+.git
+.gitignore
+.vscode
+.openspec
+*.md
