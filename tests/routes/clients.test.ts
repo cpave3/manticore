@@ -91,4 +91,70 @@ describe('clients routes', () => {
       expect(body.error).toHaveProperty('type', 'invalid_request_error');
     });
   });
+
+  describe('PATCH /:id', () => {
+    it('renames an existing client', async () => {
+      await withFreshDb(async (db) => {
+        const client = await makeClient(db, { name: 'alpha' });
+        const res = await clientsApp.request(`/${client.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'alpha-renamed' }),
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.id).toBe(client.id);
+        expect(body.name).toBe('alpha-renamed');
+
+        // verify persistence
+        const getRes = await clientsApp.request('/');
+        const list = await getRes.json();
+        const found = list.find((c: any) => c.id === client.id);
+        expect(found.name).toBe('alpha-renamed');
+      });
+    });
+
+    it('returns 404 for unknown id', async () => {
+      await withFreshDb(async () => {
+        const res = await clientsApp.request('/non-existent-id', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'newname' }),
+        });
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        expect(body.error).toHaveProperty('type', 'not_found_error');
+      });
+    });
+
+    it('returns 409 for duplicate name', async () => {
+      await withFreshDb(async (db) => {
+        await makeClient(db, { name: 'taken' });
+        const client = await makeClient(db, { name: 'free' });
+
+        const res = await clientsApp.request(`/${client.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'taken' }),
+        });
+        expect(res.status).toBe(409);
+        const body = await res.json();
+        expect(body.error).toHaveProperty('type', 'conflict_error');
+      });
+    });
+
+    it('returns 400 for missing name', async () => {
+      await withFreshDb(async (db) => {
+        const client = await makeClient(db, { name: 'ok' });
+        const res = await clientsApp.request(`/${client.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toHaveProperty('type', 'invalid_request_error');
+      });
+    });
+  });
 });

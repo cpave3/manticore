@@ -46,6 +46,35 @@ export async function listClients(): Promise<ClientResponse[]> {
   return rows.map(rowToResponse);
 }
 
+export async function updateClientName(id: string, newName: string): Promise<ClientResponse> {
+  const db = getDb();
+  const existing = await db.select().from(clients).where(eq(clients.id, id)).get();
+  if (!existing) {
+    throw new HttpError({
+      message: 'Client not found',
+      status: 404,
+      type: 'not_found_error',
+    });
+  }
+
+  const duplicate = await db
+    .select()
+    .from(clients)
+    .where(and(eq(clients.name, newName), isNull(clients.deletedAt)))
+    .get();
+  if (duplicate && duplicate.id !== id) {
+    throw new HttpError({
+      message: 'Client name already exists',
+      status: 409,
+      type: 'conflict_error',
+    });
+  }
+
+  await db.update(clients).set({ name: newName }).where(eq(clients.id, id));
+
+  return rowToResponse({ ...existing, name: newName });
+}
+
 export async function deleteClient(id: string): Promise<void> {
   const db = getDb();
   const row = await db.select().from(clients).where(eq(clients.id, id)).get();

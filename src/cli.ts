@@ -3,7 +3,7 @@
 
 import { loadConfig } from './config.js';
 import { getDb } from './db/client.js';
-import { createClient, listClients, deleteClient } from './services/clients.js';
+import { createClient, listClients, deleteClient, updateClientName } from './services/clients.js';
 import { createUpstream, listUpstreams, deleteUpstream, updateUpstreamName, findUpstreamByName } from './services/upstreams.js';
 import { createMapping, listMappings, deleteMapping, updateMapping } from './services/model-mappings.js';
 
@@ -16,6 +16,7 @@ Commands:
   clients create <name>                     Create a new client
   clients list                              List all clients
   clients delete <id>                       Soft-delete a client
+  clients edit <id> <newName>               Rename a client
 
   upstreams create <name> <baseUrl> [--api-key <key>] [--header k=v ...]
                                             Register an upstream
@@ -108,6 +109,22 @@ async function run() {
       getDb();
       await deleteClient(id);
       console.log('Client deleted.');
+      return;
+    }
+
+    if (sub === 'edit') {
+      const id = args[2];
+      const newName = args[3];
+      if (!id || !newName) {
+        console.error('Error: client id and new name are required');
+        process.exit(1);
+      }
+      loadConfig();
+      getDb();
+      const updated = await updateClientName(id, newName);
+      console.log('Client renamed:');
+      console.log(`  id    : ${updated.id}`);
+      console.log(`  name  : ${updated.name}`);
       return;
     }
 

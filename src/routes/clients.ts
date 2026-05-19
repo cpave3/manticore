@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { createClientBodySchema, clientIdParamSchema } from '../schemas/clients.js';
-import { createClient, listClients, deleteClient } from '../services/clients.js';
+import { createClientBodySchema, updateClientBodySchema, clientIdParamSchema } from '../schemas/clients.js';
+import { createClient, listClients, deleteClient, updateClientName } from '../services/clients.js';
 import { HttpError, buildApiError } from '../lib/errors.js';
 
 const app = new Hono();
@@ -42,6 +42,30 @@ app.post('/', async (c) => {
 app.get('/', async (c) => {
   const clients = await listClients();
   return c.json(clients);
+});
+
+app.patch('/:id', async (c) => {
+  const paramParsed = clientIdParamSchema.safeParse({ id: c.req.param('id') });
+  if (!paramParsed.success) {
+    const message = paramParsed.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+    return c.json(buildApiError(message, 'invalid_request_error'), 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(buildApiError('Invalid JSON body', 'invalid_request_error'), 400);
+  }
+
+  const bodyParsed = updateClientBodySchema.safeParse(body);
+  if (!bodyParsed.success) {
+    const message = bodyParsed.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+    return c.json(buildApiError(message, 'invalid_request_error'), 400);
+  }
+
+  const client = await updateClientName(paramParsed.data.id, bodyParsed.data.name);
+  return c.json(client, 200);
 });
 
 app.delete('/:id', async (c) => {

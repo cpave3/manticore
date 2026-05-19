@@ -36,6 +36,13 @@ export function createClient(body: { name: string }) {
   });
 }
 
+export function updateClient(id: string, body: { name: string }) {
+  return fetchJson<ClientResponse>(`/clients/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
 export function deleteClient(id: string) {
   return fetchJson<void>(`/clients/${id}`, { method: 'DELETE' });
 }

@@ -6,6 +6,7 @@ import {
   createClient,
   listClients,
   deleteClient,
+  updateClientName,
   findClientByApiKey,
 } from '../../src/services/clients.js';
 import { HttpError } from '../../src/lib/errors.js';
@@ -72,6 +73,41 @@ describe('clients service', () => {
         await deleteClient('non-existent-id');
       } catch (err) {
         expect((err as HttpError).status).toBe(404);
+      }
+    });
+  });
+
+  describe('updateClientName', () => {
+    it('renames a client and returns the response', async () => {
+      const { client: created } = await createClient('old-name');
+      const resp = await updateClientName(created.id, 'new-name');
+      expect(resp.name).toBe('new-name');
+      expect(resp.id).toBe(created.id);
+
+      // verify persistence
+      const list = await listClients();
+      const found = list.find((c) => c.id === created.id);
+      expect(found).toBeDefined();
+      expect(found!.name).toBe('new-name');
+    });
+
+    it('throws HttpError(404) for unknown id', async () => {
+      await expect(updateClientName('non-existent-id', 'whatever')).rejects.toThrow(HttpError);
+      try {
+        await updateClientName('non-existent-id', 'whatever');
+      } catch (err) {
+        expect((err as HttpError).status).toBe(404);
+      }
+    });
+
+    it('throws HttpError(409) for duplicate name', async () => {
+      await createClient('existing');
+      const { client: c2 } = await createClient('original');
+      await expect(updateClientName(c2.id, 'existing')).rejects.toThrow(HttpError);
+      try {
+        await updateClientName(c2.id, 'existing');
+      } catch (err) {
+        expect((err as HttpError).status).toBe(409);
       }
     });
   });

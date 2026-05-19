@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ClientResponse, ClientCreateResponse } from '../../../src/types/api';
-import { listClients, createClient, deleteClient } from '../api/client';
+import { listClients, createClient, updateClient, deleteClient } from '../api/client';
 
 export default function ClientsAdmin() {
   const [clients, setClients] = useState<ClientResponse[]>([]);
@@ -8,6 +8,9 @@ export default function ClientsAdmin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<ClientCreateResponse | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +52,31 @@ export default function ClientsAdmin() {
     setError(null);
     try {
       await deleteClient(id);
+      setClients(await listClients());
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function startEdit(c: ClientResponse) {
+    setEditingId(c.id);
+    setEditName(c.name);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditName('');
+  }
+
+  async function saveEdit(id: string) {
+    if (!editName.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await updateClient(id, { name: editName.trim() });
+      setEditingId(null);
       setClients(await listClients());
     } catch (err) {
       setError((err as Error).message);
@@ -119,13 +147,44 @@ export default function ClientsAdmin() {
             ) : (
               clients.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.name}</td>
-                  <td>{c.apiKeyMasked}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="danger" onClick={() => handleDelete(c.id)} disabled={loading}>
-                      Delete
-                    </button>
-                  </td>
+                  {editingId === c.id ? (
+                    <>
+                      <td>
+                        <input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEdit(c.id);
+                            if (e.key === 'Escape') cancelEdit();
+                          }}
+                          disabled={loading}
+                          style={{ width: '100%' }}
+                        />
+                      </td>
+                      <td>{c.apiKeyMasked}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button onClick={() => saveEdit(c.id)} disabled={loading}>
+                          Save
+                        </button>
+                        <button className="ghost" onClick={cancelEdit} disabled={loading} style={{ marginLeft: 8 }}>
+                          Cancel
+                        </button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{c.name}</td>
+                      <td>{c.apiKeyMasked}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button onClick={() => startEdit(c)} disabled={loading || !!c.deletedAt}>
+                          Edit
+                        </button>
+                        <button className="danger" onClick={() => handleDelete(c.id)} disabled={loading} style={{ marginLeft: 8 }}>
+                          Delete
+                        </button>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))
             )}
