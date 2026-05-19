@@ -15,6 +15,22 @@ export const createModelMappingBodySchema = z.object({
 
 export type CreateModelMappingBody = z.infer<typeof createModelMappingBodySchema>;
 
+export const updateModelMappingBodySchema = z.object({
+  abstractName: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9][a-z0-9-_.]*$/i, {
+      message: 'Invalid abstract model name',
+    })
+    .optional(),
+  upstreamId: z.string().min(1).optional(),
+  modelPath: z.string().min(1).optional(),
+  priority: z.number().int().min(1).optional(),
+});
+
+export type UpdateModelMappingBody = z.infer<typeof updateModelMappingBodySchema>;
+
 export const modelMappingIdParamSchema = z.object({
   id: z.string(),
 });

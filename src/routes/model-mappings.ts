@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { createModelMappingBodySchema, modelMappingIdParamSchema } from '../schemas/model-mappings.js';
-import { createMapping, listMappings, deleteMapping } from '../services/model-mappings.js';
+import { createModelMappingBodySchema, updateModelMappingBodySchema, modelMappingIdParamSchema } from '../schemas/model-mappings.js';
+import { createMapping, listMappings, deleteMapping, updateMapping } from '../services/model-mappings.js';
 import { HttpError } from '../lib/errors.js';
 import type { ApiError } from '../lib/errors.js';
 
@@ -48,6 +48,60 @@ app.post('/', async (c) => {
 app.get('/', (c) => {
   const mappings = listMappings();
   return c.json(mappings);
+});
+
+app.patch('/:id', async (c) => {
+  const raw = c.req.param();
+  const parsed = modelMappingIdParamSchema.safeParse(raw);
+  if (!parsed.success) {
+    const message = parsed.error.issues.map((i) => i.message).join('; ');
+    return c.json(
+      {
+        error: {
+          message,
+          type: 'invalid_request_error',
+        },
+      },
+      400 as any,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      {
+        error: {
+          message: 'Invalid JSON body',
+          type: 'invalid_request_error',
+        },
+      },
+      400 as any,
+    );
+  }
+
+  const bodyParsed = updateModelMappingBodySchema.safeParse(body);
+  if (!bodyParsed.success) {
+    const message = bodyParsed.error.issues.map((i) => i.message).join('; ');
+    return c.json(
+      {
+        error: {
+          message,
+          type: 'invalid_request_error',
+        },
+      },
+      400 as any,
+    );
+  }
+
+  const mapping = updateMapping(parsed.data.id, {
+    abstractName: bodyParsed.data.abstractName,
+    upstreamId: bodyParsed.data.upstreamId,
+    modelPath: bodyParsed.data.modelPath,
+    priority: bodyParsed.data.priority,
+  });
+  return c.json(mapping, 200 as any);
 });
 
 app.delete('/:id', async (c) => {

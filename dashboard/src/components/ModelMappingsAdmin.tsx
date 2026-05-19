@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ModelMappingResponse, UpstreamResponse } from '../../../src/types/api';
-import { listModelMappings, createModelMapping, deleteModelMapping, listUpstreams } from '../api/client';
+import { listModelMappings, createModelMapping, updateModelMapping, deleteModelMapping, listUpstreams } from '../api/client';
 
 export default function ModelMappingsAdmin() {
   const [mappings, setMappings] = useState<ModelMappingResponse[]>([]);
@@ -11,6 +11,12 @@ export default function ModelMappingsAdmin() {
   const [priority, setPriority] = useState('1');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAbstractName, setEditAbstractName] = useState('');
+  const [editUpstreamId, setEditUpstreamId] = useState('');
+  const [editModelPath, setEditModelPath] = useState('');
+  const [editPriority, setEditPriority] = useState('1');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,6 +80,61 @@ export default function ModelMappingsAdmin() {
     }
   }
 
+  function startEdit(m: ModelMappingResponse) {
+    setEditingId(m.id);
+    setEditAbstractName(m.abstractName);
+    setEditUpstreamId(m.upstreamId);
+    setEditModelPath(m.modelPath);
+    setEditPriority(String(m.priority));
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditAbstractName('');
+    setEditUpstreamId('');
+    setEditModelPath('');
+    setEditPriority('1');
+  }
+
+  async function saveEdit(id: string) {
+    if (!editAbstractName.trim() || !editUpstreamId || !editModelPath.trim()) return;
+    const p = Number(editPriority.trim());
+    if (Number.isNaN(p) || p < 1) {
+      setError('Priority must be a positive integer');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      await updateModelMapping(id, {
+        abstractName: editAbstractName.trim(),
+        upstreamId: editUpstreamId,
+        modelPath: editModelPath.trim(),
+        priority: p,
+      });
+      setEditingId(null);
+      setMappings(await listModelMappings());
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function upstreamOptions() {
+    return (
+      <>
+        <option value="">— Select upstream —</option>
+        {upstreams.map((u) => (
+          <option key={u.id} value={u.id}>
+            {u.name} ({u.baseUrl})
+          </option>
+        ))}
+      </>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div className="card">
@@ -95,12 +156,7 @@ export default function ModelMappingsAdmin() {
               onChange={(e) => setSelectedUpstreamId(e.target.value)}
               required
             >
-              <option value="">— Select upstream —</option>
-              {upstreams.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.baseUrl})
-                </option>
-              ))}
+              {upstreamOptions()}
             </select>
           </div>
           <div className="form-group">
@@ -156,15 +212,69 @@ export default function ModelMappingsAdmin() {
             ) : (
               mappings.map((m) => (
                 <tr key={m.id}>
-                  <td>{m.abstractName}</td>
-                  <td>{m.upstreamName}</td>
-                  <td>{m.modelPath}</td>
-                  <td>{m.priority}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button className="danger" onClick={() => handleDelete(m.id)} disabled={loading}>
-                      Delete
-                    </button>
-                  </td>
+                  {editingId === m.id ? (
+                    <>
+                      <td>
+                        <input
+                          value={editAbstractName}
+                          onChange={(e) => setEditAbstractName(e.target.value)}
+                          disabled={loading}
+                          style={{ width: '100%' }}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={editUpstreamId}
+                          onChange={(e) => setEditUpstreamId(e.target.value)}
+                          disabled={loading}
+                          style={{ width: '100%' }}
+                        >
+                          {upstreamOptions()}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          value={editModelPath}
+                          onChange={(e) => setEditModelPath(e.target.value)}
+                          disabled={loading}
+                          style={{ width: '100%' }}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={1}
+                          value={editPriority}
+                          onChange={(e) => setEditPriority(e.target.value)}
+                          disabled={loading}
+                          style={{ width: '100%' }}
+                        />
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button onClick={() => saveEdit(m.id)} disabled={loading}>
+                          Save
+                        </button>
+                        <button className="ghost" onClick={cancelEdit} disabled={loading} style={{ marginLeft: 8 }}>
+                          Cancel
+                        </button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{m.abstractName}</td>
+                      <td>{m.upstreamName}</td>
+                      <td>{m.modelPath}</td>
+                      <td>{m.priority}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button onClick={() => startEdit(m)} disabled={loading}>
+                          Edit
+                        </button>
+                        <button className="danger" onClick={() => handleDelete(m.id)} disabled={loading} style={{ marginLeft: 8 }}>
+                          Delete
+                        </button>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))
             )}

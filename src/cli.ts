@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import { getDb } from './db/client.js';
 import { createClient, listClients, deleteClient } from './services/clients.js';
 import { createUpstream, listUpstreams, deleteUpstream, updateUpstreamName, findUpstreamByName } from './services/upstreams.js';
-import { createMapping, listMappings, deleteMapping } from './services/model-mappings.js';
+import { createMapping, listMappings, deleteMapping, updateMapping } from './services/model-mappings.js';
 
 const args = process.argv.slice(2);
 
@@ -27,6 +27,9 @@ Commands:
                                             Create a model mapping
   model-mappings list                       List all model mappings
   model-mappings delete <id>                Delete a model mapping
+  model-mappings edit <id> [--abstract-name <name>] [--upstream <upstream>]
+                                            [--model-path <path>] [--priority <n>]
+                                            Update a model mapping
 
   migrate                                   Run database migrations
 
@@ -220,7 +223,7 @@ async function run() {
       for (let i = 5; i < args.length; i++) {
         if (args[i] === '--priority' && i + 1 < args.length) {
           const n = Number(args[++i]);
-          if (Number.isNaN(n) || n < 1) {
+          if (Number.isNaN(n) || !Number.isInteger(n) || n < 1) {
             console.error('Error: priority must be a positive integer');
             process.exit(1);
           }
@@ -282,6 +285,63 @@ async function run() {
       getDb();
       deleteMapping(id);
       console.log('Model mapping deleted.');
+      return;
+    }
+
+    if (sub === 'edit') {
+      const id = args[2];
+      if (!id) {
+        console.error('Error: model mapping id is required');
+        process.exit(1);
+      }
+
+      let abstractName: string | undefined;
+      let upstreamName: string | undefined;
+      let modelPath: string | undefined;
+      let priority: number | undefined;
+
+      for (let i = 3; i < args.length; i++) {
+        if (args[i] === '--abstract-name' && i + 1 < args.length) {
+          abstractName = args[++i];
+        } else if (args[i] === '--upstream' && i + 1 < args.length) {
+          upstreamName = args[++i];
+        } else if (args[i] === '--model-path' && i + 1 < args.length) {
+          modelPath = args[++i];
+        } else if (args[i] === '--priority' && i + 1 < args.length) {
+          const n = Number(args[++i]);
+          if (Number.isNaN(n) || !Number.isInteger(n) || n < 1) {
+            console.error('Error: priority must be a positive integer');
+            process.exit(1);
+          }
+          priority = n;
+        }
+      }
+
+      loadConfig();
+      getDb();
+
+      let upstreamId: string | undefined;
+      if (upstreamName) {
+        const upstream = findUpstreamByName(upstreamName);
+        if (!upstream) {
+          console.error(`Error: upstream '${upstreamName}' not found`);
+          process.exit(1);
+        }
+        upstreamId = upstream.id;
+      }
+
+      const mapping = updateMapping(id, {
+        abstractName,
+        upstreamId,
+        modelPath,
+        priority,
+      });
+      console.log('Model mapping updated:');
+      console.log(`  id           : ${mapping.id}`);
+      console.log(`  abstractName : ${mapping.abstractName}`);
+      console.log(`  upstreamName : ${mapping.upstreamName}`);
+      console.log(`  modelPath    : ${mapping.modelPath}`);
+      console.log(`  priority     : ${mapping.priority}`);
       return;
     }
 

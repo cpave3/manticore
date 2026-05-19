@@ -5,6 +5,7 @@ import {
   createMapping,
   listMappings,
   deleteMapping,
+  updateMapping,
 } from '../../src/services/model-mappings.js';
 import { HttpError } from '../../src/lib/errors.js';
 
@@ -95,6 +96,66 @@ describe('model-mappings service', () => {
       expect(() => deleteMapping('non-existent-id')).toThrow(HttpError);
       try {
         deleteMapping('non-existent-id');
+      } catch (err) {
+        expect((err as HttpError).status).toBe(404);
+      }
+    });
+  });
+
+  describe('updateMapping', () => {
+    it('updates all fields and returns the response', async () => {
+      const a = await makeUpstream(dbCtx.db, { name: 'a', baseUrl: 'http://a' });
+      const b = await makeUpstream(dbCtx.db, { name: 'b', baseUrl: 'http://b' });
+      const created = createMapping({ abstractName: 'alpha', upstreamId: a.id, modelPath: 'm1', priority: 1 });
+
+      const resp = updateMapping(created.id, {
+        abstractName: 'beta',
+        upstreamId: b.id,
+        modelPath: 'm2',
+        priority: 2,
+      });
+
+      expect(resp.abstractName).toBe('beta');
+      expect(resp.upstreamId).toBe(b.id);
+      expect(resp.modelPath).toBe('m2');
+      expect(resp.priority).toBe(2);
+      expect(resp.upstreamName).toBe('b');
+    });
+
+    it('allows partial updates', async () => {
+      const a = await makeUpstream(dbCtx.db, { name: 'a', baseUrl: 'http://a' });
+      const created = createMapping({ abstractName: 'alpha', upstreamId: a.id, modelPath: 'm1', priority: 1 });
+
+      const resp = updateMapping(created.id, { modelPath: 'm2' });
+
+      expect(resp.abstractName).toBe('alpha');
+      expect(resp.upstreamId).toBe(a.id);
+      expect(resp.modelPath).toBe('m2');
+      expect(resp.priority).toBe(1);
+      expect(resp.upstreamName).toBe('a');
+
+      // verify persistence
+      const after = listMappings().find((m) => m.id === created.id);
+      expect(after).toBeDefined();
+      expect(after!.modelPath).toBe('m2');
+      expect(after!.upstreamName).toBe('a');
+    });
+
+    it('throws HttpError(404) for unknown id', () => {
+      expect(() => updateMapping('non-existent-id', { modelPath: 'x' })).toThrow(HttpError);
+      try {
+        updateMapping('non-existent-id', { modelPath: 'x' });
+      } catch (err) {
+        expect((err as HttpError).status).toBe(404);
+      }
+    });
+
+    it('throws HttpError(404) for non-existent upstreamId', async () => {
+      const a = await makeUpstream(dbCtx.db, { name: 'a', baseUrl: 'http://a' });
+      const created = createMapping({ abstractName: 'alpha', upstreamId: a.id, modelPath: 'm1' });
+      expect(() => updateMapping(created.id, { upstreamId: 'non-existent-id' })).toThrow(HttpError);
+      try {
+        updateMapping(created.id, { upstreamId: 'non-existent-id' });
       } catch (err) {
         expect((err as HttpError).status).toBe(404);
       }

@@ -80,6 +80,61 @@ export function deleteMapping(id: string): void {
   }
 }
 
+export type UpdateMappingInput = {
+  abstractName?: string;
+  upstreamId?: string;
+  modelPath?: string;
+  priority?: number;
+};
+
+export function updateMapping(id: string, input: UpdateMappingInput): ModelMappingResponse {
+  const db = getDb();
+  const existing = db.select().from(modelMappings).where(eq(modelMappings.id, id)).get();
+  if (!existing) {
+    throw new HttpError({
+      message: 'Model mapping not found',
+      status: 404,
+      type: 'not_found_error',
+    });
+  }
+
+  // Validate upstream if changing
+  if (input.upstreamId !== undefined) {
+    const upstream = findUpstreamById(input.upstreamId);
+    if (!upstream) {
+      throw new HttpError({
+        message: `Upstream not found: ${input.upstreamId}`,
+        status: 404,
+        type: 'not_found_error',
+      });
+    }
+  }
+
+  db.update(modelMappings)
+    .set({
+      abstractName: input.abstractName ?? existing.abstractName,
+      upstreamId: input.upstreamId ?? existing.upstreamId,
+      modelPath: input.modelPath ?? existing.modelPath,
+      priority: input.priority ?? existing.priority,
+    })
+    .where(eq(modelMappings.id, id))
+    .run();
+
+  const finalUpstreamId = input.upstreamId ?? existing.upstreamId;
+  const upstreamName = findUpstreamById(finalUpstreamId)?.name ?? '—';
+
+  return toModelMappingResponse(
+    {
+      ...existing,
+      abstractName: input.abstractName ?? existing.abstractName,
+      upstreamId: finalUpstreamId,
+      modelPath: input.modelPath ?? existing.modelPath,
+      priority: input.priority ?? existing.priority,
+    },
+    upstreamName
+  );
+}
+
 export function resolveModelMapping(
   abstractName: string
 ): { upstreamId: string; modelPath: string } | null {

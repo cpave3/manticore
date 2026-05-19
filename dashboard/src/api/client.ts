@@ -83,6 +83,21 @@ export function createModelMapping(body: {
   });
 }
 
+export function updateModelMapping(
+  id: string,
+  body: {
+    abstractName?: string;
+    upstreamId?: string;
+    modelPath?: string;
+    priority?: number;
+  }
+) {
+  return fetchJson<ModelMappingResponse>(`/model-mappings/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
 export function deleteModelMapping(id: string) {
   return fetchJson<void>(`/model-mappings/${id}`, { method: 'DELETE' });
 }
