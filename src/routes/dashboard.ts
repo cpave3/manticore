@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import {
   breakdownQuerySchema,
   timeSeriesQuerySchema,
+  heatmapQuerySchema,
   eventLogQuerySchema,
 } from '../schemas/dashboard.js';
-import { summary, breakdown, timeSeries, eventLog } from '../services/aggregations.js';
+import { summary, breakdown, timeSeries, heatmap, eventLog } from '../services/aggregations.js';
 import { HttpError } from '../lib/errors.js';
 import type { ApiError } from '../lib/errors.js';
 
@@ -44,6 +45,15 @@ app.get('/time-series', async (c) => {
     return c.json({ error: { message: parsed.error.message, type: 'invalid_request_error' } }, 400 as any);
   }
   const result = await timeSeries(parsed.data.bucket);
+  return c.json(result);
+});
+
+app.get('/heatmap', async (c) => {
+  const parsed = heatmapQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    return c.json({ error: { message: parsed.error.message, type: 'invalid_request_error' } }, 400 as any);
+  }
+  const result = await heatmap(parsed.data.days);
   return c.json(result);
 });
 

@@ -64,6 +64,12 @@ export type DashboardTimeSeriesPoint = {
   completionTokens: number;
 };
 
+export type DashboardHeatmapPoint = {
+  date: string;
+  requests: number;
+  totalTokens: number;
+};
+
 export type EventLogResponse = {
   items: LogRecordResponse[];
   total: number;

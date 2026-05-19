@@ -8,6 +8,10 @@ export const timeSeriesQuerySchema = z.object({
   bucket: z.enum(['hour', 'day']).default('hour'),
 });
 
+export const heatmapQuerySchema = z.object({
+  days: z.coerce.number().int().min(1).max(365).default(90),
+});
+
 export const eventLogQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(50),

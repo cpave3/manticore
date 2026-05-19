@@ -75,7 +75,7 @@ function toModelMappingResponse(row: ModelMappingSelect | ModelMappingInsert): M
     abstractName: row.abstractName,
     upstreamName: row.upstreamName,
     modelPath: row.modelPath,
-    priority: row.priority,
+    priority: row.priority ?? 1,
     createdAt:
       row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
   };

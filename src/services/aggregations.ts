@@ -5,6 +5,7 @@ import type {
   DashboardSummary,
   DashboardBreakdownRow,
   DashboardTimeSeriesPoint,
+  DashboardHeatmapPoint,
   EventLogResponse,
   LogRecordResponse,
 } from '../types/api.js';
@@ -145,6 +146,48 @@ export async function timeSeries(
     promptTokens: Number(r.promptTokens),
     completionTokens: Number(r.completionTokens),
   }));
+}
+
+export async function heatmap(days: number): Promise<DashboardHeatmapPoint[]> {
+  const db = getDb();
+
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  start.setUTCDate(start.getUTCDate() - days + 1);
+
+  const bucketExpr = sql<string>`strftime('%Y-%m-%d', ${logRecords.createdAt} / 1000, 'unixepoch')`;
+
+  const rows = await db
+    .select({
+      date: bucketExpr,
+      requests: count(),
+      totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
+    })
+    .from(logRecords)
+    .where(gt(logRecords.createdAt, start))
+    .groupBy(bucketExpr)
+    .orderBy(asc(bucketExpr))
+    .all();
+
+  // Zero-fill missing days in the window
+  const dataMap = new Map<string, { requests: number; totalTokens: number }>();
+  for (const r of rows) {
+    dataMap.set(r.date, { requests: Number(r.requests), totalTokens: Number(r.totalTokens) });
+  }
+
+  const result: DashboardHeatmapPoint[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setUTCDate(start.getUTCDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    const entry = dataMap.get(iso);
+    result.push({
+      date: iso,
+      requests: entry?.requests ?? 0,
+      totalTokens: entry?.totalTokens ?? 0,
+    });
+  }
+  return result;
 }
 
 const sortableColumns = {

@@ -5,6 +5,7 @@ import type {
   DashboardSummary,
   DashboardBreakdownRow,
   DashboardTimeSeriesPoint,
+  DashboardHeatmapPoint,
   EventLogResponse,
 } from '../../../src/types/api';
 
@@ -91,6 +92,12 @@ export function dashboardTimeSeries(params: { bucket: 'hour' | 'day' }) {
   const qs = new URLSearchParams();
   qs.set('bucket', params.bucket);
   return fetchJson<DashboardTimeSeriesPoint[]>(`/dashboard/time-series?${qs}`);
+}
+
+export function dashboardHeatmap(params: { days?: number }) {
+  const qs = new URLSearchParams();
+  qs.set('days', String(params.days ?? 90));
+  return fetchJson<DashboardHeatmapPoint[]>(`/dashboard/heatmap?${qs}`);
 }
 
 export function eventLog(params: {

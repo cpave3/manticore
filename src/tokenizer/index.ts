@@ -65,19 +65,18 @@ function countGpt(text: string): number | null {
 
 // ─── HF-tokenizer cache ──────────────────────────────────────────────────────
 
-const hfLoadCache = new Map<string, Promise<PreTrainedTokenizer>>();
+const hfLoadCache = new Map<string, Promise<PreTrainedTokenizer | null>>();
 
 async function getHfTokenizer(repo: string): Promise<PreTrainedTokenizer | null> {
   let loader = hfLoadCache.get(repo);
   if (loader) return loader;
 
-  loader = AutoTokenizer.from_pretrained(repo)
-    .catch((err: unknown) => {
-      console.warn(
-        `[tokenizer] Failed to load HF tokenizer "${repo}": ${err instanceof Error ? err.message : String(err)}`
-      );
-      return null;
-    });
+  loader = AutoTokenizer.from_pretrained(repo).catch((err: unknown) => {
+    console.warn(
+      `[tokenizer] Failed to load HF tokenizer "${repo}": ${err instanceof Error ? err.message : String(err)}`
+    );
+    return null;
+  });
 
   hfLoadCache.set(repo, loader);
   return loader;

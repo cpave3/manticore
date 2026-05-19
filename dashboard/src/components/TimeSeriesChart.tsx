@@ -1,97 +1,100 @@
 import { useMemo } from 'react';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from 'recharts';
+import { chartColors } from '../theme/charts';
 import type { DashboardTimeSeriesPoint } from '../../../src/types/api';
 
+function formatShortDate(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export default function TimeSeriesChart({ data }: { data: DashboardTimeSeriesPoint[] }) {
-  const svg = useMemo(() => {
-    if (data.length === 0) return null;
-
-    const width = 800;
-    const height = 300;
-    const padding = { top: 20, right: 20, bottom: 40, left: 50 };
-    const chartW = width - padding.left - padding.right;
-    const chartH = height - padding.top - padding.bottom;
-
-    const maxTokens = Math.max(1, ...data.map((d) => d.promptTokens + d.completionTokens));
-    const maxReqs = Math.max(1, ...data.map((d) => d.requests));
-
-    const x0 = padding.left;
-    const x1 = width - padding.right;
-    const y0 = padding.top;
-    const y1 = height - padding.bottom;
-
-    const xScale = (i: number) => x0 + (i / (data.length - 1 || 1)) * chartW;
-    const yScaleTok = (v: number) => y1 - (v / maxTokens) * chartH;
-    const yScaleReq = (v: number) => y1 - (v / maxReqs) * chartH;
-
-    const tokenLine = data
-      .map((d, i) => `${i === 0 ? 'M' : 'L'} ${xScale(i)} ${yScaleTok(d.promptTokens + d.completionTokens)}`)
-      .join(' ');
-
-    const areaPath =
-      `${tokenLine} L ${xScale(data.length - 1)} ${y1} L ${x0} ${y1} Z`;
-
-    const bars = data.map((d, i) => {
-      const barW = Math.max(2, chartW / data.length * 0.5);
-      const h = (d.requests / maxReqs) * chartH;
-      const x = xScale(i) - barW / 2;
-      const y = y1 - h;
-      return <rect key={i} x={x} y={y} width={barW} height={h} className="bar" rx={2} />;
-    });
-
-    const yTicksTok = [0, maxTokens / 2, maxTokens];
-    const yTicksReq = [0, maxReqs / 2, maxReqs];
-
-    return (
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="xMidYMid meet">
-        {/* Grid lines */}
-        {[0, 0.5, 1].map((t) => {
-          const y = y0 + t * chartH;
-          return <line key={t} x1={x0} x2={x1} y1={y} y2={y} className="grid-line" />;
-        })}
-
-        {/* Area + line */}
-        <path d={areaPath} className="area-path" />
-        <path d={tokenLine} className="line-path" />
-
-        {/* Bars */}
-        {bars}
-
-        {/* Y axis labels - tokens */}
-        <g className="axis">
-          {yTicksTok.map((v, i) => {
-            const y = yScaleTok(v);
-            return (
-              <text key={`tok-${i}`} x={x0 - 8} y={y + 4} textAnchor="end" fontSize="11" fill="var(--text-muted)">
-                {v.toLocaleString(undefined, { notation: 'compact' })}
-              </text>
-            );
-          })}
-        </g>
-
-        {/* X axis labels */}
-        <g className="axis">
-          {data.map((d, i) => {
-            if (data.length > 12 && i % Math.ceil(data.length / 6) !== 0) return null;
-            const date = new Date(d.bucketStart).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-            const time = new Date(d.bucketStart).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-            return (
-              <text key={i} x={xScale(i)} y={y1 + 15} textAnchor="middle" fontSize="10" fill="var(--text-muted)">
-                {date} {time}
-              </text>
-            );
-          })}
-        </g>
-      </svg>
-    );
-  }, [data]);
+  const chartData = useMemo(
+    () =>
+      data.map((d) => ({
+        label: formatShortDate(d.bucketStart),
+        tokens: d.promptTokens + d.completionTokens,
+        requests: d.requests,
+      })),
+    [data],
+  );
 
   return (
     <div className="card chart-container">
-      <h3>Requests &amp; Tokens Over Time</h3>
+      <h3>Requests & Tokens Over Time</h3>
       {data.length === 0 ? (
         <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No data</p>
       ) : (
-        svg
+        <div style={{ height: 280 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData}>
+              <XAxis
+                dataKey="label"
+                tick={{ fill: chartColors.textMuted, fontSize: 10 }}
+                tickLine={{ stroke: chartColors.border }}
+                axisLine={{ stroke: chartColors.border }}
+                minTickGap={40}
+              />
+              <YAxis
+                yAxisId="left"
+                tick={{ fill: chartColors.textMuted, fontSize: 10 }}
+                tickLine={{ stroke: chartColors.border }}
+                axisLine={{ stroke: chartColors.border }}
+                tickFormatter={(v: number) => v.toLocaleString(undefined, { notation: 'compact' })}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                tick={{ fill: chartColors.textMuted, fontSize: 10 }}
+                tickLine={{ stroke: chartColors.border }}
+                axisLine={{ stroke: chartColors.border }}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: chartColors.surface,
+                  border: `1px solid ${chartColors.border}`,
+                  borderRadius: 8,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                  fontSize: 12,
+                  color: chartColors.text,
+                }}
+                labelStyle={{ color: chartColors.textHeading, marginBottom: 4 }}
+                formatter={(value: number, name: string) => [
+                  value.toLocaleString(),
+                  name === 'tokens' ? 'Tokens' : 'Requests',
+                ]}
+              />
+              <Area
+                yAxisId="left"
+                type="monotone"
+                dataKey="tokens"
+                stroke={chartColors.accent}
+                fill={chartColors.accent}
+                fillOpacity={0.15}
+                strokeWidth={2}
+                dot={false}
+                animationDuration={300}
+              />
+              <Bar
+                yAxisId="right"
+                dataKey="requests"
+                fill={chartColors.accent}
+                opacity={0.4}
+                barSize={6}
+                radius={[2, 2, 0, 0]}
+                animationDuration={300}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
       )}
     </div>
   );

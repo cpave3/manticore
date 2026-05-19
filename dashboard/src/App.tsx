@@ -1,14 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { DashboardSummary, DashboardBreakdownRow, DashboardTimeSeriesPoint, EventLogResponse } from '../../src/types/api';
+import type { DashboardSummary, DashboardBreakdownRow, DashboardTimeSeriesPoint, DashboardHeatmapPoint, EventLogResponse } from '../../src/types/api';
 import {
   dashboardSummary,
   dashboardBreakdown,
   dashboardTimeSeries,
+  dashboardHeatmap,
   eventLog,
 } from './api/client';
 import SummaryCards from './components/SummaryCards';
 import BreakdownTable from './components/BreakdownTable';
 import TimeSeriesChart from './components/TimeSeriesChart';
+import UsageHeatmap from './components/UsageHeatmap';
 import EventLogTable from './components/EventLogTable';
 import ClientsAdmin from './components/ClientsAdmin';
 import UpstreamsAdmin from './components/UpstreamsAdmin';
@@ -28,6 +30,7 @@ export default function App() {
   const [breakdownModel, setBreakdownModel] = useState<DashboardBreakdownRow[]>([]);
   const [breakdownUpstream, setBreakdownUpstream] = useState<DashboardBreakdownRow[]>([]);
   const [timeSeries, setTimeSeries] = useState<DashboardTimeSeriesPoint[]>([]);
+  const [heatmap, setHeatmap] = useState<DashboardHeatmapPoint[]>([]);
 
   // Events state
   const [events, setEvents] = useState<EventLogResponse | null>(null);
@@ -38,18 +41,20 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [s, bc, bm, bu, ts] = await Promise.all([
+      const [s, bc, bm, bu, ts, hm] = await Promise.all([
         dashboardSummary(),
         dashboardBreakdown('client'),
         dashboardBreakdown('model'),
         dashboardBreakdown('upstream'),
         dashboardTimeSeries({ bucket: 'hour' }),
+        dashboardHeatmap({}),
       ]);
       setSummary(s);
       setBreakdownClient(bc);
       setBreakdownModel(bm);
       setBreakdownUpstream(bu);
       setTimeSeries(ts);
+      setHeatmap(hm);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -131,6 +136,7 @@ export default function App() {
               <BreakdownTable title="By Model" rows={breakdownModel} />
               <BreakdownTable title="By Upstream" rows={breakdownUpstream} />
             </div>
+            <UsageHeatmap data={heatmap} />
           </div>
         )}
         {tab === 'events' && (
