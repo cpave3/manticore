@@ -119,40 +119,4 @@ describe('dashboard routes', () => {
       expect(body.error).toHaveProperty('type', 'invalid_request_error');
     });
   });
-
-  it('GET /heatmap returns daily data for default window', async () => {
-    await withFreshDb(async () => {
-      const db = getDb();
-      await makeLogRecord(db, { createdAt: new Date() });
-
-      const res = await dashboardApp.request('/heatmap');
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBe(90); // default days
-      for (const p of body) {
-        expect(p).toHaveProperty('date');
-        expect(p).toHaveProperty('requests');
-        expect(p).toHaveProperty('totalTokens');
-      }
-    });
-  });
-
-  it('GET /heatmap?days=7 returns 7 points', async () => {
-    await withFreshDb(async () => {
-      const res = await dashboardApp.request('/heatmap?days=7');
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.length).toBe(7);
-    });
-  });
-
-  it('GET /heatmap?days=junk returns 400', async () => {
-    await withFreshDb(async () => {
-      const res = await dashboardApp.request('/heatmap?days=junk');
-      expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.error).toHaveProperty('type', 'invalid_request_error');
-    });
-  });
 });

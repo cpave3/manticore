@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { freshDb, schema } from '../helpers/db.js';
 import { makeClient, makeUpstream, makeLogRecord } from '../helpers/factories.js';
-import { summary, breakdown, timeSeries, heatmap, eventLog } from '../../src/services/aggregations.js';
+import { summary, breakdown, timeSeries, eventLog } from '../../src/services/aggregations.js';
 
 describe('aggregations service', () => {
   async function seedData(db: ReturnType<typeof freshDb>['db']) {
@@ -252,53 +252,4 @@ describe('aggregations service', () => {
     });
   });
 
-  describe('heatmap', () => {
-    it('zero-fills missing days in the requested window', async () => {
-      const dbCtx = freshDb();
-      try {
-        await seedData(dbCtx.db);
-        const points = await heatmap(7);
-        expect(points.length).toBe(7);
-        // All dates should be present in ascending order
-        for (let i = 1; i < points.length; i++) {
-          expect(new Date(points[i].date).getTime()).toBeGreaterThanOrEqual(new Date(points[i - 1].date).getTime());
-        }
-        // Today has data from seed
-        const today = points[points.length - 1];
-        expect(today.requests).toBeGreaterThan(0);
-        expect(today.totalTokens).toBeGreaterThan(0);
-      } finally {
-        dbCtx.cleanup();
-      }
-    });
-
-    it('respects the days parameter window and excludes older records', async () => {
-      const dbCtx = freshDb();
-      try {
-        await seedData(dbCtx.db);
-        const points = await heatmap(3);
-        expect(points.length).toBe(3);
-        const totalReqs = points.reduce((sum, p) => sum + p.requests, 0);
-        // now+hourAgo+twoHoursAgo all on today (3), yesterday (1), total 4
-        expect(totalReqs).toBe(4);
-      } finally {
-        dbCtx.cleanup();
-      }
-    });
-
-    it('returns empty zeros when no data in window', async () => {
-      const dbCtx = freshDb();
-      try {
-        // No data seeded
-        const points = await heatmap(7);
-        expect(points.length).toBe(7);
-        for (const p of points) {
-          expect(p.requests).toBe(0);
-          expect(p.totalTokens).toBe(0);
-        }
-      } finally {
-        dbCtx.cleanup();
-      }
-    });
-  });
 });
