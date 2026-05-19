@@ -5,13 +5,14 @@ import modelMappingsApp from '../../src/routes/model-mappings.js';
 
 describe('model-mappings routes', () => {
   it('POST / with full body returns 201', async () => {
-    await withFreshDb(async () => {
+    await withFreshDb(async (db) => {
+      const upstream = await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new' });
       const res = await modelMappingsApp.request('/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           abstractName: 'kimi-k2.5',
-          upstreamName: 'synthetic',
+          upstreamId: upstream.id,
           modelPath: 'kimi-k2.5-202501',
           priority: 2,
         }),
@@ -20,6 +21,7 @@ describe('model-mappings routes', () => {
       const body = await res.json();
       expect(body).toHaveProperty('id');
       expect(body).toHaveProperty('abstractName', 'kimi-k2.5');
+      expect(body).toHaveProperty('upstreamId', upstream.id);
       expect(body).toHaveProperty('upstreamName', 'synthetic');
       expect(body).toHaveProperty('modelPath', 'kimi-k2.5-202501');
       expect(body).toHaveProperty('priority', 2);
@@ -27,13 +29,14 @@ describe('model-mappings routes', () => {
   });
 
   it('POST / invalid abstractName returns 400', async () => {
-    await withFreshDb(async () => {
+    await withFreshDb(async (db) => {
+      const upstream = await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new' });
       const res = await modelMappingsApp.request('/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           abstractName: 'has spaces',
-          upstreamName: 'synthetic',
+          upstreamId: upstream.id,
           modelPath: 'x',
         }),
       });
@@ -45,11 +48,11 @@ describe('model-mappings routes', () => {
 
   it('GET / returns array', async () => {
     await withFreshDb(async (db) => {
-      await makeUpstream(db, { name: 'a', baseUrl: 'http://a' });
+      const upstream = await makeUpstream(db, { name: 'a', baseUrl: 'http://a' });
       await modelMappingsApp.request('/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ abstractName: 'x', upstreamName: 'a', modelPath: 'y' }),
+        body: JSON.stringify({ abstractName: 'x', upstreamId: upstream.id, modelPath: 'y' }),
       });
 
       const res = await modelMappingsApp.request('/');
@@ -61,11 +64,12 @@ describe('model-mappings routes', () => {
   });
 
   it('DELETE /:id works; DELETE missing returns 404', async () => {
-    await withFreshDb(async () => {
+    await withFreshDb(async (db) => {
+      const upstream = await makeUpstream(db, { name: 'a', baseUrl: 'http://a' });
       const createRes = await modelMappingsApp.request('/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ abstractName: 'delme', upstreamName: 'a', modelPath: 'y' }),
+        body: JSON.stringify({ abstractName: 'delme', upstreamId: upstream.id, modelPath: 'y' }),
       });
       expect(createRes.status).toBe(201);
       const created = await createRes.json();

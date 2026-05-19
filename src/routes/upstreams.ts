@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { createUpstreamBodySchema, upstreamIdParamSchema } from '../schemas/upstreams.js';
-import { createUpstream, listUpstreams, deleteUpstream } from '../services/upstreams.js';
+import { createUpstreamBodySchema, updateUpstreamBodySchema, upstreamIdParamSchema } from '../schemas/upstreams.js';
+import { createUpstream, listUpstreams, deleteUpstream, updateUpstreamName } from '../services/upstreams.js';
 import { HttpError } from '../lib/errors.js';
 import type { ApiError } from '../lib/errors.js';
 
@@ -67,6 +67,55 @@ app.delete('/:id', async (c) => {
   }
   deleteUpstream(parsed.data.id);
   return c.body(null, 204 as any);
+});
+
+app.patch('/:id', async (c) => {
+  const raw = c.req.param();
+  const parsed = upstreamIdParamSchema.safeParse(raw);
+  if (!parsed.success) {
+    const message = parsed.error.issues.map((i) => i.message).join('; ');
+    return c.json(
+      {
+        error: {
+          message,
+          type: 'invalid_request_error',
+        },
+      },
+      400 as any,
+    );
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(
+      {
+        error: {
+          message: 'Invalid JSON body',
+          type: 'invalid_request_error',
+        },
+      },
+      400 as any,
+    );
+  }
+
+  const bodyParsed = updateUpstreamBodySchema.safeParse(body);
+  if (!bodyParsed.success) {
+    const message = bodyParsed.error.issues.map((i) => i.message).join('; ');
+    return c.json(
+      {
+        error: {
+          message,
+          type: 'invalid_request_error',
+        },
+      },
+      400 as any,
+    );
+  }
+
+  const upstream = updateUpstreamName(parsed.data.id, bodyParsed.data.name);
+  return c.json(upstream, 200 as any);
 });
 
 export default app;

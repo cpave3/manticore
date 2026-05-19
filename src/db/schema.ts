@@ -26,7 +26,7 @@ export type UpstreamInsert = typeof upstreams.$inferInsert;
 export const modelMappings = sqliteTable('model_mappings', {
   id: text('id').primaryKey(),
   abstractName: text('abstract_name').notNull(),
-  upstreamName: text('upstream_name').notNull(),
+  upstreamId: text('upstream_id').notNull(),
   modelPath: text('model_path').notNull(),
   priority: integer('priority').notNull().default(1),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),

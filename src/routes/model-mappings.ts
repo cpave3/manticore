@@ -38,7 +38,7 @@ app.post('/', async (c) => {
   }
   const mapping = createMapping({
     abstractName: parsed.data.abstractName,
-    upstreamName: parsed.data.upstreamName,
+    upstreamId: parsed.data.upstreamId,
     modelPath: parsed.data.modelPath,
     priority: parsed.data.priority,
   });

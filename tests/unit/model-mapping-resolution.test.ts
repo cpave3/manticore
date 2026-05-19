@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { freshDb } from '../helpers/db.js';
-import { makeModelMapping, makeUpstream } from '../helpers/factories.js';
+import { freshDb, schema } from '../helpers/db.js';
+import { makeUpstream, makeModelMapping } from '../helpers/factories.js';
 import {
-  createMapping,
   resolveModelMapping,
 } from '../../src/services/model-mappings.js';
+import { eq } from 'drizzle-orm';
 
 let dbCtx: ReturnType<typeof freshDb>;
 
@@ -18,25 +18,25 @@ describe('model mapping resolution', () => {
   });
 
   it('resolves to the highest-priority mapping', async () => {
-    await makeUpstream(dbCtx.db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new' });
-    await makeUpstream(dbCtx.db, { name: 'openrouter', baseUrl: 'https://openrouter.ai' });
+    const s = await makeUpstream(dbCtx.db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new' });
+    const o = await makeUpstream(dbCtx.db, { name: 'openrouter', baseUrl: 'https://openrouter.ai' });
 
     await makeModelMapping(dbCtx.db, {
       abstractName: 'kimi-k2.5',
-      upstreamName: 'openrouter',
+      upstreamId: o.id,
       modelPath: 'moonshotai/kimi-k2.5',
       priority: 2,
     });
     await makeModelMapping(dbCtx.db, {
       abstractName: 'kimi-k2.5',
-      upstreamName: 'synthetic',
+      upstreamId: s.id,
       modelPath: 'kimi-k2.5-202501',
       priority: 1,
     });
 
     const resolved = resolveModelMapping('kimi-k2.5');
     expect(resolved).not.toBeNull();
-    expect(resolved!.upstreamName).toBe('synthetic');
+    expect(resolved!.upstreamId).toBe(s.id);
     expect(resolved!.modelPath).toBe('kimi-k2.5-202501');
   });
 

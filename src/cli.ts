@@ -4,7 +4,7 @@
 import { loadConfig } from './config.js';
 import { getDb } from './db/client.js';
 import { createClient, listClients, deleteClient } from './services/clients.js';
-import { createUpstream, listUpstreams, deleteUpstream } from './services/upstreams.js';
+import { createUpstream, listUpstreams, deleteUpstream, updateUpstreamName, findUpstreamByName } from './services/upstreams.js';
 import { createMapping, listMappings, deleteMapping } from './services/model-mappings.js';
 
 const args = process.argv.slice(2);
@@ -21,6 +21,7 @@ Commands:
                                             Register an upstream
   upstreams list                            List all upstreams
   upstreams delete <id>                     Delete an upstream
+  upstreams edit <id> <newName>             Rename an upstream
 
   model-mappings create <abstract> <upstream> <modelPath> [--priority N]
                                             Create a model mapping
@@ -184,6 +185,22 @@ async function run() {
       return;
     }
 
+    if (sub === 'edit') {
+      const id = args[2];
+      const newName = args[3];
+      if (!id || !newName) {
+        console.error('Error: upstream id and new name are required');
+        process.exit(1);
+      }
+      loadConfig();
+      getDb();
+      const updated = updateUpstreamName(id, newName);
+      console.log('Upstream renamed:');
+      console.log(`  id    : ${updated.id}`);
+      console.log(`  name  : ${updated.name}`);
+      return;
+    }
+
     console.error(`Unknown upstreams subcommand: ${sub ?? '(none)'}`);
     process.exit(1);
   }
@@ -213,15 +230,21 @@ async function run() {
 
       loadConfig();
       getDb();
+      const upstream = findUpstreamByName(upstreamName);
+      if (!upstream) {
+        console.error(`Error: upstream '${upstreamName}' not found`);
+        process.exit(1);
+      }
       const mapping = createMapping({
         abstractName,
-        upstreamName,
+        upstreamId: upstream.id,
         modelPath,
         priority,
       });
       console.log('Created model mapping:');
       console.log(`  id           : ${mapping.id}`);
       console.log(`  abstractName : ${mapping.abstractName}`);
+      console.log(`  upstreamId   : ${mapping.upstreamId}`);
       console.log(`  upstreamName : ${mapping.upstreamName}`);
       console.log(`  modelPath    : ${mapping.modelPath}`);
       console.log(`  priority     : ${mapping.priority}`);
@@ -240,6 +263,7 @@ async function run() {
         rows.map((r) => ({
           id: r.id,
           abstractName: r.abstractName,
+          upstreamId: r.upstreamId,
           upstreamName: r.upstreamName,
           modelPath: r.modelPath,
           priority: r.priority,

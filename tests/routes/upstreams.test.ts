@@ -107,4 +107,86 @@ describe('upstreams routes', () => {
       expect(body.error).toHaveProperty('type');
     });
   });
+
+  describe('PATCH /:id', () => {
+    it('renames an existing upstream', async () => {
+      await withFreshDb(async () => {
+        const createRes = await upstreamsApp.request('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'alpha', baseUrl: 'https://a.com' }),
+        });
+        expect(createRes.status).toBe(201);
+        const created = await createRes.json();
+
+        const patchRes = await upstreamsApp.request(`/${created.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'alpha-renamed' }),
+        });
+        expect(patchRes.status).toBe(200);
+        const body = await patchRes.json();
+        expect(body.id).toBe(created.id);
+        expect(body.name).toBe('alpha-renamed');
+      });
+    });
+
+    it('returns 404 for unknown id', async () => {
+      await withFreshDb(async () => {
+        const res = await upstreamsApp.request('/non-existent-id', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'newname' }),
+        });
+        expect(res.status).toBe(404);
+        const body = await res.json();
+        expect(body.error).toHaveProperty('type', 'not_found_error');
+      });
+    });
+
+    it('returns 409 for duplicate name', async () => {
+      await withFreshDb(async () => {
+        await upstreamsApp.request('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'taken', baseUrl: 'https://taken.com' }),
+        });
+        const createRes = await upstreamsApp.request('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'free', baseUrl: 'https://free.com' }),
+        });
+        const created = await createRes.json();
+
+        const patchRes = await upstreamsApp.request(`/${created.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'taken' }),
+        });
+        expect(patchRes.status).toBe(409);
+        const body = await patchRes.json();
+        expect(body.error).toHaveProperty('type', 'conflict_error');
+      });
+    });
+
+    it('returns 400 for invalid name', async () => {
+      await withFreshDb(async () => {
+        const createRes = await upstreamsApp.request('/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'ok', baseUrl: 'https://ok.com' }),
+        });
+        const created = await createRes.json();
+
+        const patchRes = await upstreamsApp.request(`/${created.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'has spaces' }),
+        });
+        expect(patchRes.status).toBe(400);
+        const body = await patchRes.json();
+        expect(body.error).toHaveProperty('type', 'invalid_request_error');
+      });
+    });
+  });
 });

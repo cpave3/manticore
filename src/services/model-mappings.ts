@@ -1,26 +1,36 @@
 import { randomUUID } from 'node:crypto';
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
-import { modelMappings, type ModelMappingSelect, type ModelMappingInsert } from '../db/schema.js';
-import { findUpstreamByName } from './upstreams.js';
+import { modelMappings, upstreams, type ModelMappingSelect, type ModelMappingInsert } from '../db/schema.js';
+import { findUpstreamById } from './upstreams.js';
 import { HttpError } from '../lib/errors.js';
 import type { ModelMappingResponse } from '../types/api.js';
 
 export type CreateMappingInput = {
   abstractName: string;
-  upstreamName: string;
+  upstreamId: string;
   modelPath: string;
   priority?: number;
 };
 
 export function createMapping(input: CreateMappingInput): ModelMappingResponse {
   const db = getDb();
-  const now = new Date();
 
+  // Validate upstream exists
+  const upstream = findUpstreamById(input.upstreamId);
+  if (!upstream) {
+    throw new HttpError({
+      message: `Upstream not found: ${input.upstreamId}`,
+      status: 404,
+      type: 'not_found_error',
+    });
+  }
+
+  const now = new Date();
   const insert: ModelMappingInsert = {
     id: randomUUID(),
     abstractName: input.abstractName,
-    upstreamName: input.upstreamName,
+    upstreamId: input.upstreamId,
     modelPath: input.modelPath,
     priority: input.priority ?? 1,
     createdAt: now,
@@ -28,17 +38,34 @@ export function createMapping(input: CreateMappingInput): ModelMappingResponse {
 
   db.insert(modelMappings).values(insert).run();
 
-  return toModelMappingResponse(insert);
+  return toModelMappingResponse(insert, upstream.name);
 }
 
 export function listMappings(): ModelMappingResponse[] {
   const db = getDb();
   const rows = db
-    .select()
+    .select({
+      id: modelMappings.id,
+      abstractName: modelMappings.abstractName,
+      upstreamId: modelMappings.upstreamId,
+      upstreamName: upstreams.name,
+      modelPath: modelMappings.modelPath,
+      priority: modelMappings.priority,
+      createdAt: modelMappings.createdAt,
+    })
     .from(modelMappings)
+    .leftJoin(upstreams, eq(modelMappings.upstreamId, upstreams.id))
     .orderBy(modelMappings.abstractName, asc(modelMappings.priority))
     .all();
-  return rows.map(toModelMappingResponse);
+  return rows.map((r) => ({
+    id: r.id,
+    abstractName: r.abstractName,
+    upstreamId: r.upstreamId,
+    upstreamName: r.upstreamName ?? '—',
+    modelPath: r.modelPath,
+    priority: r.priority ?? 1,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+  }));
 }
 
 export function deleteMapping(id: string): void {
@@ -55,7 +82,7 @@ export function deleteMapping(id: string): void {
 
 export function resolveModelMapping(
   abstractName: string
-): { upstreamName: string; modelPath: string } | null {
+): { upstreamId: string; modelPath: string } | null {
   const db = getDb();
   const row = db
     .select()
@@ -66,14 +93,15 @@ export function resolveModelMapping(
     .get();
 
   if (!row) return null;
-  return { upstreamName: row.upstreamName, modelPath: row.modelPath };
+  return { upstreamId: row.upstreamId, modelPath: row.modelPath };
 }
 
-function toModelMappingResponse(row: ModelMappingSelect | ModelMappingInsert): ModelMappingResponse {
+function toModelMappingResponse(row: ModelMappingSelect | ModelMappingInsert, upstreamName?: string): ModelMappingResponse {
   return {
     id: row.id,
     abstractName: row.abstractName,
-    upstreamName: row.upstreamName,
+    upstreamId: row.upstreamId,
+    upstreamName: upstreamName ?? '—',
     modelPath: row.modelPath,
     priority: row.priority ?? 1,
     createdAt:

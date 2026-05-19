@@ -8,7 +8,7 @@ export const createModelMappingBodySchema = z.object({
     .regex(/^[a-z0-9][a-z0-9-_.]*$/i, {
       message: 'Invalid abstract model name',
     }),
-  upstreamName: z.string().min(1).max(64),
+  upstreamId: z.string().min(1),
   modelPath: z.string().min(1),
   priority: z.number().int().min(1).optional(),
 });

@@ -6,6 +6,7 @@ import type {
   DashboardBreakdownRow,
   DashboardTimeSeriesPoint,
   EventLogResponse,
+  ModelMappingResponse,
 } from '../../../src/types/api';
 
 const API_BASE = '/api';
@@ -55,21 +56,28 @@ export function createUpstream(body: {
   });
 }
 
+export function updateUpstream(id: string, body: { name: string }) {
+  return fetchJson<UpstreamResponse>(`/upstreams/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
 export function deleteUpstream(id: string) {
   return fetchJson<void>(`/upstreams/${id}`, { method: 'DELETE' });
 }
 
 export function listModelMappings() {
-  return fetchJson<import('../../../src/types/api').ModelMappingResponse[]>('/model-mappings');
+  return fetchJson<ModelMappingResponse[]>('/model-mappings');
 }
 
 export function createModelMapping(body: {
   abstractName: string;
-  upstreamName: string;
+  upstreamId: string;
   modelPath: string;
   priority?: number;
 }) {
-  return fetchJson<import('../../../src/types/api').ModelMappingResponse>('/model-mappings', {
+  return fetchJson<ModelMappingResponse>('/model-mappings', {
     method: 'POST',
     body: JSON.stringify(body),
   });

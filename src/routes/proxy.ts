@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { apiKeyAuth } from '../middleware/auth.js';
-import { findUpstreamByName, type RawUpstream } from '../services/upstreams.js';
+import { findUpstreamByName, findUpstreamById, type RawUpstream } from '../services/upstreams.js';
 import { parseModelId } from '../services/model-id.js';
 import { resolveModelMapping } from '../services/model-mappings.js';
 import { forward, type ForwardResult } from '../services/proxy.js';
@@ -71,8 +71,9 @@ app.post('/chat/completions', async (c) => {
   const modelId = body.model;
 
   // 3. Resolve model ID (abstract mapping wins over direct routing)
-  let provider: string;
+  let provider: string | undefined;
   let modelPath: string;
+  let upstream: RawUpstream | null = null;
 
   const lookupName =
     typeof modelId === 'string' && modelId.startsWith('manticore/')
@@ -82,7 +83,7 @@ app.post('/chat/completions', async (c) => {
   const mapping = resolveModelMapping(lookupName);
 
   if (mapping) {
-    provider = mapping.upstreamName;
+    upstream = findUpstreamById(mapping.upstreamId);
     modelPath = mapping.modelPath;
   } else {
     // Fall back to direct provider/model routing
@@ -90,6 +91,7 @@ app.post('/chat/completions', async (c) => {
       const parsed = parseModelId(modelId as string);
       provider = parsed.provider;
       modelPath = parsed.modelPath;
+      upstream = findUpstreamByName(provider);
     } catch (err: unknown) {
       if (err instanceof HttpError) {
         return c.json(err.toJson(), err.status as any);
@@ -97,10 +99,10 @@ app.post('/chat/completions', async (c) => {
       return c.json(buildApiError('Invalid model ID', 'invalid_request_error'), 400);
     }
   }
-
-  // 4. Find upstream
-  const upstream = findUpstreamByName(provider);
   if (!upstream) {
+    const errorMsg = provider != null
+      ? `Unknown provider '${provider}'`
+      : `Upstream for model '${modelId}' not found`;
     const log = buildLogRecord({
       clientId: client.id,
       clientName: client.name,
@@ -114,12 +116,12 @@ app.post('/chat/completions', async (c) => {
       finishReason: null,
       status: 'error',
       statusCode: 404,
-      errorMessage: `Unknown provider '${provider}'`,
+      errorMessage: errorMsg,
       startTime,
     });
     writeLogRecord(log);
     return c.json(
-      buildApiError(`Unknown provider '${provider}'`, 'not_found'),
+      buildApiError(errorMsg, 'not_found'),
       404
     );
   }

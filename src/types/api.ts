@@ -74,6 +74,7 @@ export type EventLogResponse = {
 export type ModelMappingResponse = {
   id: string;
   abstractName: string;
+  upstreamId: string;
   upstreamName: string;
   modelPath: string;
   priority: number;

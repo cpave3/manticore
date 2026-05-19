@@ -305,12 +305,12 @@ describe('proxy integration', () => {
     await withFreshDb(async () => {
       const db = getDb();
       const client = await makeClient(db);
-      await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new', apiKey: 'syn-key' });
+      const upstream = await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new', apiKey: 'syn-key' });
 
       await db.insert(schema.modelMappings).values({
         id: 'test-mapping-id',
         abstractName: 'kimi-k2.5',
-        upstreamName: 'synthetic',
+        upstreamId: upstream.id,
         modelPath: 'kimi-k2.5-202501',
         priority: 1,
         createdAt: new Date(),
@@ -382,12 +382,12 @@ describe('proxy integration', () => {
     await withFreshDb(async () => {
       const db = getDb();
       const client = await makeClient(db);
-      await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new', apiKey: 'syn-key' });
+      const upstream = await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new', apiKey: 'syn-key' });
 
       await db.insert(schema.modelMappings).values({
         id: 'test-mapping-id-2',
         abstractName: 'kimi-k2.5',
-        upstreamName: 'synthetic',
+        upstreamId: upstream.id,
         modelPath: 'kimi-k2.5-202501',
         priority: 1,
         createdAt: new Date(),

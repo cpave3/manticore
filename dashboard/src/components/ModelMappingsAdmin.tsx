@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { ModelMappingResponse } from '../../../src/types/api';
-import { listModelMappings, createModelMapping, deleteModelMapping } from '../api/client';
+import type { ModelMappingResponse, UpstreamResponse } from '../../../src/types/api';
+import { listModelMappings, createModelMapping, deleteModelMapping, listUpstreams } from '../api/client';
 
 export default function ModelMappingsAdmin() {
   const [mappings, setMappings] = useState<ModelMappingResponse[]>([]);
+  const [upstreams, setUpstreams] = useState<UpstreamResponse[]>([]);
   const [abstractName, setAbstractName] = useState('');
-  const [upstreamName, setUpstreamName] = useState('');
+  const [selectedUpstreamId, setSelectedUpstreamId] = useState('');
   const [modelPath, setModelPath] = useState('');
   const [priority, setPriority] = useState('1');
   const [loading, setLoading] = useState(false);
@@ -16,6 +17,7 @@ export default function ModelMappingsAdmin() {
     setError(null);
     try {
       setMappings(await listModelMappings());
+      setUpstreams(await listUpstreams());
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -29,7 +31,7 @@ export default function ModelMappingsAdmin() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!abstractName.trim() || !upstreamName.trim() || !modelPath.trim()) return;
+    if (!abstractName.trim() || !selectedUpstreamId || !modelPath.trim()) return;
 
     const p = Number(priority.trim());
     if (Number.isNaN(p) || p < 1) {
@@ -42,12 +44,12 @@ export default function ModelMappingsAdmin() {
     try {
       await createModelMapping({
         abstractName: abstractName.trim(),
-        upstreamName: upstreamName.trim(),
+        upstreamId: selectedUpstreamId,
         modelPath: modelPath.trim(),
         priority: p,
       });
       setAbstractName('');
-      setUpstreamName('');
+      setSelectedUpstreamId('');
       setModelPath('');
       setPriority('1');
       setMappings(await listModelMappings());
@@ -87,13 +89,19 @@ export default function ModelMappingsAdmin() {
             />
           </div>
           <div className="form-group">
-            <label>Upstream Name</label>
-            <input
-              value={upstreamName}
-              onChange={(e) => setUpstreamName(e.target.value)}
-              placeholder="e.g. synthetic"
+            <label>Upstream</label>
+            <select
+              value={selectedUpstreamId}
+              onChange={(e) => setSelectedUpstreamId(e.target.value)}
               required
-            />
+            >
+              <option value="">— Select upstream —</option>
+              {upstreams.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.baseUrl})
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-group">
             <label>Model Path</label>

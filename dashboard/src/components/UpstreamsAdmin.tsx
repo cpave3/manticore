@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { UpstreamResponse } from '../../../src/types/api';
-import { listUpstreams, createUpstream, deleteUpstream } from '../api/client';
+import { listUpstreams, createUpstream, updateUpstream, deleteUpstream } from '../api/client';
 
 export default function UpstreamsAdmin() {
   const [upstreams, setUpstreams] = useState<UpstreamResponse[]>([]);
@@ -10,6 +10,9 @@ export default function UpstreamsAdmin() {
   const [headersStr, setHeadersStr] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,6 +71,31 @@ export default function UpstreamsAdmin() {
     setError(null);
     try {
       await deleteUpstream(id);
+      setUpstreams(await listUpstreams());
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function startEdit(u: UpstreamResponse) {
+    setEditingId(u.id);
+    setEditName(u.name);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditName('');
+  }
+
+  async function saveEdit(id: string) {
+    if (!editName.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await updateUpstream(id, { name: editName.trim() });
+      setEditingId(null);
       setUpstreams(await listUpstreams());
     } catch (err) {
       setError((err as Error).message);
@@ -135,13 +163,44 @@ export default function UpstreamsAdmin() {
             ) : (
               upstreams.map((u) => (
                 <tr key={u.id}>
-                  <td>{u.name}</td>
+                  <td>
+                    {editingId === u.id ? (
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEdit(u.id);
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                        disabled={loading}
+                        style={{ width: '100%' }}
+                      />
+                    ) : (
+                      u.name
+                    )}
+                  </td>
                   <td>{u.baseUrl}</td>
                   <td>{u.apiKeyMasked ?? '—'}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="danger" onClick={() => handleDelete(u.id)} disabled={loading}>
-                      Delete
-                    </button>
+                    {editingId === u.id ? (
+                      <>
+                        <button onClick={() => saveEdit(u.id)} disabled={loading}>
+                          Save
+                        </button>
+                        <button className="ghost" onClick={cancelEdit} disabled={loading} style={{ marginLeft: 8 }}>
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => startEdit(u)} disabled={loading}>
+                          Edit
+                        </button>
+                        <button className="danger" onClick={() => handleDelete(u.id)} disabled={loading} style={{ marginLeft: 8 }}>
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

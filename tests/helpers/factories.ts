@@ -47,7 +47,7 @@ export async function makeModelMapping(
   const id = overrides.id ?? randomUUID();
   const values = {
     abstractName: 'kimi-k2.5',
-    upstreamName: 'synthetic',
+    upstreamId: 'synthetic-id',
     modelPath: 'kimi-k2.5-202501',
     priority: 1,
     createdAt: new Date(),

@@ -7,6 +7,8 @@ import {
   listUpstreams,
   deleteUpstream,
   findUpstreamByName,
+  findUpstreamById,
+  updateUpstreamName,
 } from '../../src/services/upstreams.js';
 import { HttpError } from '../../src/lib/errors.js';
 
@@ -99,6 +101,58 @@ describe('upstreams service', () => {
     it('returns null for missing name', () => {
       const found = findUpstreamByName('missing');
       expect(found).toBeNull();
+    });
+  });
+
+  describe('findUpstreamById', () => {
+    it('returns the raw row by id', async () => {
+      const u = await makeUpstream(dbCtx.db, {
+        name: 'ollama',
+        baseUrl: 'http://localhost:11434',
+        apiKey: 'secret-key',
+      });
+      const found = findUpstreamById(u.id);
+      expect(found).not.toBeNull();
+      expect(found!.id).toBe(u.id);
+      expect(found!.name).toBe('ollama');
+      expect(found!.apiKey).toBe('secret-key');
+    });
+
+    it('returns null for missing id', () => {
+      const found = findUpstreamById('missing');
+      expect(found).toBeNull();
+    });
+  });
+
+  describe('updateUpstreamName', () => {
+    it('updates the name and returns the response', async () => {
+      const u = await makeUpstream(dbCtx.db, { name: 'old-name', baseUrl: 'http://x' });
+      const resp = updateUpstreamName(u.id, 'new-name');
+      expect(resp.name).toBe('new-name');
+      expect(resp.id).toBe(u.id);
+
+      const rows = await dbCtx.db.select().from(schema.upstreams).where(eq(schema.upstreams.id, u.id));
+      expect(rows[0].name).toBe('new-name');
+    });
+
+    it('throws HttpError(404) for unknown id', () => {
+      expect(() => updateUpstreamName('non-existent-id', 'whatever')).toThrow(HttpError);
+      try {
+        updateUpstreamName('non-existent-id', 'whatever');
+      } catch (err) {
+        expect((err as HttpError).status).toBe(404);
+      }
+    });
+
+    it('throws HttpError(409) for duplicate name', async () => {
+      await makeUpstream(dbCtx.db, { name: 'existing', baseUrl: 'http://a' });
+      const u = await makeUpstream(dbCtx.db, { name: 'original', baseUrl: 'http://b' });
+      expect(() => updateUpstreamName(u.id, 'existing')).toThrow(HttpError);
+      try {
+        updateUpstreamName(u.id, 'existing');
+      } catch (err) {
+        expect((err as HttpError).status).toBe(409);
+      }
     });
   });
 });

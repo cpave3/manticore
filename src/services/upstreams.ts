@@ -60,6 +60,36 @@ export function deleteUpstream(id: string): void {
   }
 }
 
+export function updateUpstreamName(id: string, newName: string): UpstreamResponse {
+  const db = getDb();
+  const existing = db.select().from(upstreams).where(eq(upstreams.id, id)).get();
+  if (!existing) {
+    throw new HttpError({
+      message: 'Upstream not found',
+      status: 404,
+      type: 'not_found_error',
+    });
+  }
+
+  try {
+    db.update(upstreams)
+      .set({ name: newName })
+      .where(eq(upstreams.id, id))
+      .run();
+  } catch (err: unknown) {
+    if (isUniqueConstraintError(err)) {
+      throw new HttpError({
+        message: 'Upstream name already exists',
+        status: 409,
+        type: 'conflict_error',
+      });
+    }
+    throw err;
+  }
+
+  return toUpstreamResponse({ ...existing, name: newName });
+}
+
 export type RawUpstream = Omit<UpstreamSelect, 'headers'> & {
   headers: Record<string, string> | null;
 };
@@ -67,6 +97,16 @@ export type RawUpstream = Omit<UpstreamSelect, 'headers'> & {
 export function findUpstreamByName(name: string): RawUpstream | null {
   const db = getDb();
   const row = db.select().from(upstreams).where(eq(upstreams.name, name)).get();
+  if (!row) return null;
+  return {
+    ...row,
+    headers: row.headers ? (JSON.parse(row.headers) as Record<string, string>) : null,
+  };
+}
+
+export function findUpstreamById(id: string): RawUpstream | null {
+  const db = getDb();
+  const row = db.select().from(upstreams).where(eq(upstreams.id, id)).get();
   if (!row) return null;
   return {
     ...row,
