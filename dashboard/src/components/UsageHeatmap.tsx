@@ -3,6 +3,12 @@ import { ResponsiveCalendar } from '@nivo/calendar';
 import { nivoTheme, chartColors } from '../theme/charts';
 import type { DashboardHeatmapPoint } from '../../../src/types/api';
 
+interface NivoTooltipProps {
+  day: string;
+  value: string;
+  color: string;
+}
+
 export default function UsageHeatmap({ data }: { data: DashboardHeatmapPoint[] }) {
   const nivoData = useMemo(
     () => data.map((d) => ({ day: d.date, value: d.totalTokens, requests: d.requests })),
@@ -30,21 +36,29 @@ export default function UsageHeatmap({ data }: { data: DashboardHeatmapPoint[] }
   return (
     <div className="card chart-container">
       <h3>Usage Heatmap</h3>
-      <div style={{ height: 160 }}>
+      <div style={{ height: 180 }}>
         <ResponsiveCalendar
           data={nivoData}
           from={from}
           to={to}
+          direction="horizontal"
           margin={{ top: 4, right: 4, bottom: 20, left: 32 }}
-          emptyColor={chartColors.surfaceHover}
-          colors={['#1e3344', '#1a5a8a', '#308cc4', '#4f8cf7', '#6ba0fa', '#a0c4ff']}
+          emptyColor={chartColors.surface}
+          colors={['#1a3a5a', '#25648c', '#4f8cf7', '#6ba0fa', '#a0c4ff']}
+          minValue="auto"
+          maxValue="auto"
+          yearSpacing={0}
+          monthSpacing={6}
+          monthBorderWidth={1}
+          monthBorderColor={chartColors.border}
+          daySpacing={2}
+          dayBorderWidth={1}
+          dayBorderColor={chartColors.border}
           weekLegendOffset={28}
           monthLegendPosition="before"
-          monthLegendOffset={12}
-          dayBorderWidth={2}
-          dayBorderColor={chartColors.border}
+          monthLegendOffset={10}
           theme={nivoTheme}
-          tooltip={({ day }: { day: string }) => {
+          tooltip={({ day }: NivoTooltipProps) => {
             const e = entryMap.get(day);
             if (!e) return null;
             return (
