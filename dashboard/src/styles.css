@@ -205,11 +205,6 @@ tr:hover td {
 }
 
 /* Charts */
-.chart-container svg {
-  width: 100%;
-  height: auto;
-}
-
 .bar {
   fill: var(--accent);
 }

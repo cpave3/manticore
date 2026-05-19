@@ -10,18 +10,31 @@ interface NivoTooltipProps {
 }
 
 export default function UsageHeatmap({ data }: { data: DashboardHeatmapPoint[] }) {
+  const hasData = data.length > 0 && data.some((d) => d.totalTokens > 0);
+
+  // Pass only days with usage so Nivo can distinguish "empty" from "low"
   const nivoData = useMemo(
-    () => data.map((d) => ({ day: d.date, value: d.totalTokens, requests: d.requests })),
+    () =>
+      data
+        .filter((d) => d.totalTokens > 0)
+        .map((d) => ({ day: d.date, value: d.totalTokens })),
     [data],
   );
 
   const entryMap = useMemo(() => {
-    const m = new Map<string, { value: number; requests: number }>();
-    for (const d of nivoData) m.set(d.day, { value: d.value, requests: d.requests });
+    const m = new Map<string, number>();
+    for (const d of nivoData) m.set(d.day, d.value);
     return m;
   }, [nivoData]);
 
-  if (data.length === 0) {
+  // Map back requests for the custom tooltip
+  const requestMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const d of data) m.set(d.date, d.requests);
+    return m;
+  }, [data]);
+
+  if (!hasData) {
     return (
       <div className="card chart-container">
         <h3>Usage Heatmap</h3>
@@ -36,36 +49,35 @@ export default function UsageHeatmap({ data }: { data: DashboardHeatmapPoint[] }
   return (
     <div className="card chart-container">
       <h3>Usage Heatmap</h3>
-      <div style={{ height: 180 }}>
+      <div style={{ width: '100%', height: 180, position: 'relative' }}>
         <ResponsiveCalendar
           data={nivoData}
           from={from}
           to={to}
-          direction="horizontal"
           margin={{ top: 4, right: 4, bottom: 20, left: 32 }}
-          emptyColor={chartColors.surface}
-          colors={['#1a3a5a', '#25648c', '#4f8cf7', '#6ba0fa', '#a0c4ff']}
+          emptyColor="#2c303a"
+          colors={['#3a5a8a', '#4f8cf7', '#6ba0fa', '#8fb8ff', '#b8d4ff']}
           minValue="auto"
           maxValue="auto"
           yearSpacing={0}
           monthSpacing={6}
           monthBorderWidth={1}
-          monthBorderColor={chartColors.border}
+          monthBorderColor="#3a404d"
           daySpacing={2}
           dayBorderWidth={1}
-          dayBorderColor={chartColors.border}
+          dayBorderColor="#2c303a"
           weekLegendOffset={28}
           monthLegendPosition="before"
           monthLegendOffset={10}
           theme={nivoTheme}
           tooltip={({ day }: NivoTooltipProps) => {
-            const e = entryMap.get(day);
-            if (!e) return null;
+            const tokens = entryMap.get(day) ?? 0;
+            const requests = requestMap.get(day) ?? 0;
             return (
               <div>
                 <strong>{day}</strong>
                 <div style={{ marginTop: 4 }}>
-                  {e.value.toLocaleString()} tokens · {e.requests.toLocaleString()} requests
+                  {tokens.toLocaleString()} tokens · {requests.toLocaleString()} requests
                 </div>
               </div>
             );
