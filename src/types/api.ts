@@ -71,6 +71,15 @@ export type EventLogResponse = {
   pageSize: number;
 };
 
+export type ModelMappingResponse = {
+  id: string;
+  abstractName: string;
+  upstreamName: string;
+  modelPath: string;
+  priority: number;
+  createdAt: string;
+};
+
 export type ApiError = {
   error: {
     message: string;

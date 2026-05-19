@@ -3,6 +3,7 @@ import { withFreshDb } from '../helpers/db.js';
 import { makeClient, makeUpstream } from '../helpers/factories.js';
 import proxyApp from '../../src/routes/proxy.js';
 import { getDb } from '../../src/db/client.js';
+import * as schema from '../../src/db/schema.js';
 import { logRecords } from '../../src/db/schema.js';
 
 vi.mock('../../src/tokenizer/index.js', () => ({
@@ -294,6 +295,127 @@ describe('proxy integration', () => {
         expect(row!.promptTokens).toBe(2);
         expect(row!.completionTokens).toBe(2);
         expect(row!.totalTokens).toBe(4);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  it('manticore/{abstract} resolves via model mapping and forwards mapped modelPath', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new', apiKey: 'syn-key' });
+
+      await db.insert(schema.modelMappings).values({
+        id: 'test-mapping-id',
+        abstractName: 'kimi-k2.5',
+        upstreamName: 'synthetic',
+        modelPath: 'kimi-k2.5-202501',
+        priority: 1,
+        createdAt: new Date(),
+      });
+
+      const fetchMock = mockFetchOk({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      });
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      try {
+        const res = await proxyApp.request('/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${client.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'manticore/kimi-k2.5',
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        });
+
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.choices[0].message.content).toBe('ok');
+
+        // Assert fetch was called with the mapped modelPath
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+        const sentBody = JSON.parse(init.body);
+        expect(sentBody.model).toBe('kimi-k2.5-202501');
+
+        // Assert LogRecord uses the original abstract model ID
+        const rows = await getLogRows(db);
+        const row = rows.find((r) => r.modelId === 'manticore/kimi-k2.5');
+        expect(row).toBeDefined();
+        expect(row!.upstreamName).toBe('synthetic');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  it('manticore/{abstract} unknown mapping falls through to direct provider route', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      const res = await proxyApp.request('/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${client.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'manticore/unknown-model',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      });
+      // Strips prefix → "unknown-model" not in mappings → falls through →
+      // parseModelId("manticore/unknown-model") → provider="manticore" → upstream not found
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toHaveProperty('type', 'not_found');
+    });
+  });
+
+  it('bare abstract model name resolves via mapping', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      await makeUpstream(db, { name: 'synthetic', baseUrl: 'https://api.synthetic.new', apiKey: 'syn-key' });
+
+      await db.insert(schema.modelMappings).values({
+        id: 'test-mapping-id-2',
+        abstractName: 'kimi-k2.5',
+        upstreamName: 'synthetic',
+        modelPath: 'kimi-k2.5-202501',
+        priority: 1,
+        createdAt: new Date(),
+      });
+
+      const fetchMock = mockFetchOk({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+      });
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      try {
+        const res = await proxyApp.request('/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${client.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'kimi-k2.5',
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        });
+
+        expect(res.status).toBe(200);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [, init] = fetchMock.mock.calls[0] as [string, { body: string }];
+        const sentBody = JSON.parse(init.body);
+        expect(sentBody.model).toBe('kimi-k2.5-202501');
       } finally {
         spy.mockRestore();
       }

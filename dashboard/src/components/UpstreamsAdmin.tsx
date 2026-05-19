@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { UpstreamResponse } from '../../../src/types/api';
 import { listUpstreams, createUpstream, deleteUpstream } from '../api/client';
 
@@ -22,6 +22,10 @@ export default function UpstreamsAdmin() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

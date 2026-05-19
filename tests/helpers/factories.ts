@@ -40,6 +40,25 @@ export async function makeUpstream(
   return row;
 }
 
+export async function makeModelMapping(
+  db: Db,
+  overrides: Partial<typeof schema.modelMappings.$inferInsert> = {}
+) {
+  const id = overrides.id ?? randomUUID();
+  const values = {
+    abstractName: 'kimi-k2.5',
+    upstreamName: 'synthetic',
+    modelPath: 'kimi-k2.5-202501',
+    priority: 1,
+    createdAt: new Date(),
+    ...overrides,
+    id,
+  };
+  await db.insert(schema.modelMappings).values(values);
+  const [row] = await db.select().from(schema.modelMappings).where(eq(schema.modelMappings.id, id));
+  return row;
+}
+
 export async function makeLogRecord(
   db: Db,
   overrides: Partial<typeof schema.logRecords.$inferInsert> = {}

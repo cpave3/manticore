@@ -71,15 +71,16 @@ async function getHfTokenizer(repo: string): Promise<PreTrainedTokenizer | null>
   let loader = hfLoadCache.get(repo);
   if (loader) return loader;
 
-  loader = AutoTokenizer.from_pretrained(repo).catch((err: unknown) => {
-    console.warn(
-      `[tokenizer] Failed to load HF tokenizer "${repo}": ${err instanceof Error ? err.message : String(err)}`
-    );
-    throw err;
-  });
+  loader = AutoTokenizer.from_pretrained(repo)
+    .catch((err: unknown) => {
+      console.warn(
+        `[tokenizer] Failed to load HF tokenizer "${repo}": ${err instanceof Error ? err.message : String(err)}`
+      );
+      return null;
+    });
 
   hfLoadCache.set(repo, loader);
-  return loader.catch(() => null);
+  return loader;
 }
 
 // ─── Prompt counting with HF tokenizer ───────────────────────────────────────

@@ -23,6 +23,17 @@ export const upstreams = sqliteTable('upstreams', {
 export type UpstreamSelect = typeof upstreams.$inferSelect;
 export type UpstreamInsert = typeof upstreams.$inferInsert;
 
+export const modelMappings = sqliteTable('model_mappings', {
+  id: text('id').primaryKey(),
+  abstractName: text('abstract_name').notNull(),
+  upstreamName: text('upstream_name').notNull(),
+  modelPath: text('model_path').notNull(),
+  priority: integer('priority').notNull().default(1),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+}, (table) => [
+  index('model_mappings_abstract_name_idx').on(table.abstractName),
+]);
+
 export const logRecords = sqliteTable('log_records', {
   id: text('id').primaryKey(),
   clientId: text('client_id').notNull(),
@@ -48,3 +59,6 @@ export const logRecords = sqliteTable('log_records', {
 
 export type LogRecordSelect = typeof logRecords.$inferSelect;
 export type LogRecordInsert = typeof logRecords.$inferInsert;
+
+export type ModelMappingSelect = typeof modelMappings.$inferSelect;
+export type ModelMappingInsert = typeof modelMappings.$inferInsert;

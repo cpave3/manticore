@@ -59,6 +59,26 @@ export function deleteUpstream(id: string) {
   return fetchJson<void>(`/upstreams/${id}`, { method: 'DELETE' });
 }
 
+export function listModelMappings() {
+  return fetchJson<import('../../../src/types/api').ModelMappingResponse[]>('/model-mappings');
+}
+
+export function createModelMapping(body: {
+  abstractName: string;
+  upstreamName: string;
+  modelPath: string;
+  priority?: number;
+}) {
+  return fetchJson<import('../../../src/types/api').ModelMappingResponse>('/model-mappings', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteModelMapping(id: string) {
+  return fetchJson<void>(`/model-mappings/${id}`, { method: 'DELETE' });
+}
+
 export function dashboardSummary() {
   return fetchJson<DashboardSummary>('/dashboard/summary');
 }
@@ -68,9 +88,9 @@ export function dashboardBreakdown(by: 'client' | 'model' | 'upstream') {
 }
 
 export function dashboardTimeSeries(params: { bucket: 'hour' | 'day' }) {
-  const url = new URL('/api/dashboard/time-series', location.origin);
-  url.searchParams.set('bucket', params.bucket);
-  return fetchJson<DashboardTimeSeriesPoint[]>(url.pathname + url.search);
+  const qs = new URLSearchParams();
+  qs.set('bucket', params.bucket);
+  return fetchJson<DashboardTimeSeriesPoint[]>(`/dashboard/time-series?${qs}`);
 }
 
 export function eventLog(params: {
@@ -79,10 +99,10 @@ export function eventLog(params: {
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
 }) {
-  const url = new URL('/api/dashboard/events', location.origin);
-  url.searchParams.set('page', String(params.page));
-  url.searchParams.set('pageSize', String(params.pageSize));
-  if (params.sortBy) url.searchParams.set('sortBy', params.sortBy);
-  if (params.sortDir) url.searchParams.set('sortDir', params.sortDir);
-  return fetchJson<EventLogResponse>(url.pathname + url.search);
+  const qs = new URLSearchParams();
+  qs.set('page', String(params.page));
+  qs.set('pageSize', String(params.pageSize));
+  if (params.sortBy) qs.set('sortBy', params.sortBy);
+  if (params.sortDir) qs.set('sortDir', params.sortDir);
+  return fetchJson<EventLogResponse>(`/dashboard/events?${qs}`);
 }

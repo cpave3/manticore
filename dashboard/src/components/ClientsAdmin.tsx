@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { ClientResponse, ClientCreateResponse } from '../../../src/types/api';
 import { listClients, createClient, deleteClient } from '../api/client';
 
@@ -20,6 +20,10 @@ export default function ClientsAdmin() {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

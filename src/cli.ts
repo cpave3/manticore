@@ -5,6 +5,7 @@ import { loadConfig } from './config.js';
 import { getDb } from './db/client.js';
 import { createClient, listClients, deleteClient } from './services/clients.js';
 import { createUpstream, listUpstreams, deleteUpstream } from './services/upstreams.js';
+import { createMapping, listMappings, deleteMapping } from './services/model-mappings.js';
 
 const args = process.argv.slice(2);
 
@@ -20,6 +21,11 @@ Commands:
                                             Register an upstream
   upstreams list                            List all upstreams
   upstreams delete <id>                     Delete an upstream
+
+  model-mappings create <abstract> <upstream> <modelPath> [--priority N]
+                                            Create a model mapping
+  model-mappings list                       List all model mappings
+  model-mappings delete <id>                Delete a model mapping
 
   migrate                                   Run database migrations
 
@@ -179,6 +185,83 @@ async function run() {
     }
 
     console.error(`Unknown upstreams subcommand: ${sub ?? '(none)'}`);
+    process.exit(1);
+  }
+
+  if (command === 'model-mappings') {
+    const sub = args[1];
+    if (sub === 'create') {
+      const abstractName = args[2];
+      const upstreamName = args[3];
+      const modelPath = args[4];
+      if (!abstractName || !upstreamName || !modelPath) {
+        console.error('Error: abstract name, upstream name, and model path are required');
+        process.exit(1);
+      }
+
+      let priority: number | undefined;
+      for (let i = 5; i < args.length; i++) {
+        if (args[i] === '--priority' && i + 1 < args.length) {
+          const n = Number(args[++i]);
+          if (Number.isNaN(n) || n < 1) {
+            console.error('Error: priority must be a positive integer');
+            process.exit(1);
+          }
+          priority = n;
+        }
+      }
+
+      loadConfig();
+      getDb();
+      const mapping = createMapping({
+        abstractName,
+        upstreamName,
+        modelPath,
+        priority,
+      });
+      console.log('Created model mapping:');
+      console.log(`  id           : ${mapping.id}`);
+      console.log(`  abstractName : ${mapping.abstractName}`);
+      console.log(`  upstreamName : ${mapping.upstreamName}`);
+      console.log(`  modelPath    : ${mapping.modelPath}`);
+      console.log(`  priority     : ${mapping.priority}`);
+      return;
+    }
+
+    if (sub === 'list') {
+      loadConfig();
+      getDb();
+      const rows = listMappings();
+      if (rows.length === 0) {
+        console.log('No model mappings found.');
+        return;
+      }
+      console.table(
+        rows.map((r) => ({
+          id: r.id,
+          abstractName: r.abstractName,
+          upstreamName: r.upstreamName,
+          modelPath: r.modelPath,
+          priority: r.priority,
+        }))
+      );
+      return;
+    }
+
+    if (sub === 'delete') {
+      const id = args[2];
+      if (!id) {
+        console.error('Error: model mapping id is required');
+        process.exit(1);
+      }
+      loadConfig();
+      getDb();
+      deleteMapping(id);
+      console.log('Model mapping deleted.');
+      return;
+    }
+
+    console.error(`Unknown model-mappings subcommand: ${sub ?? '(none)'}`);
     process.exit(1);
   }
 

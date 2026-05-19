@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { apiKeyAuth } from '../middleware/auth.js';
 import { findUpstreamByName, type RawUpstream } from '../services/upstreams.js';
 import { parseModelId } from '../services/model-id.js';
+import { resolveModelMapping } from '../services/model-mappings.js';
 import { forward, type ForwardResult } from '../services/proxy.js';
 import { buildLogRecord, writeLogRecord } from '../services/logging.js';
 import {
@@ -69,18 +70,32 @@ app.post('/chat/completions', async (c) => {
 
   const modelId = body.model;
 
-  // 3. Parse model ID
+  // 3. Resolve model ID (abstract mapping wins over direct routing)
   let provider: string;
   let modelPath: string;
-  try {
-    const parsed = parseModelId(modelId);
-    provider = parsed.provider;
-    modelPath = parsed.modelPath;
-  } catch (err: unknown) {
-    if (err instanceof HttpError) {
-      return c.json(err.toJson(), err.status as any);
+
+  const lookupName =
+    typeof modelId === 'string' && modelId.startsWith('manticore/')
+      ? modelId.slice('manticore/'.length)
+      : (modelId as string);
+
+  const mapping = resolveModelMapping(lookupName);
+
+  if (mapping) {
+    provider = mapping.upstreamName;
+    modelPath = mapping.modelPath;
+  } else {
+    // Fall back to direct provider/model routing
+    try {
+      const parsed = parseModelId(modelId as string);
+      provider = parsed.provider;
+      modelPath = parsed.modelPath;
+    } catch (err: unknown) {
+      if (err instanceof HttpError) {
+        return c.json(err.toJson(), err.status as any);
+      }
+      return c.json(buildApiError('Invalid model ID', 'invalid_request_error'), 400);
     }
-    return c.json(buildApiError('Invalid model ID', 'invalid_request_error'), 400);
   }
 
   // 4. Find upstream
@@ -109,8 +124,16 @@ app.post('/chat/completions', async (c) => {
     );
   }
 
-  // 5. Count prompt tokens (best-effort)
-  const promptTokens = await countPromptTokens(body.messages as ChatMessage[], modelId);
+  // 5. Count prompt tokens (best-effort) — use resolved modelPath so abstract
+  // names do not confuse the tokenizer
+  let promptTokens: number | null;
+  try {
+    promptTokens = await countPromptTokens(body.messages as ChatMessage[], modelPath);
+  } catch (err: unknown) {
+    // Tokenizer errors are non-fatal (best-effort counting)
+    promptTokens = null;
+    console.warn('[proxy] Tokenizer error (prompt):', err instanceof Error ? err.message : String(err));
+  }
 
   // 6. Record start and forward
   const isStream = body.stream === true;
@@ -152,6 +175,7 @@ app.post('/chat/completions', async (c) => {
       forwardResult,
       client,
       modelId,
+      modelPath,
       upstream,
       promptTokens,
       start,
@@ -164,6 +188,7 @@ app.post('/chat/completions', async (c) => {
     forwardResult,
     client,
     modelId,
+    modelPath,
     upstream,
     promptTokens,
     start,
@@ -192,6 +217,7 @@ type StreamContext = {
   forwardResult: ForwardResult;
   client: { id: string; name: string };
   modelId: string;
+  modelPath: string;
   upstream: RawUpstream;
   promptTokens: number | null;
   start: number;
@@ -199,9 +225,9 @@ type StreamContext = {
 };
 
 async function handleStreamingResponse(c: any, ctx: StreamContext) {
-  const { forwardResult, client, modelId, upstream, promptTokens, start, startTime } = ctx;
+  const { forwardResult, client, modelId, modelPath, upstream, promptTokens, start, startTime } = ctx;
 
-  const counter = await getStreamCounter(modelId);
+  const counter = await getStreamCounter(modelPath);
   const decoder = new TextDecoder();
   let buffer = '';
   let firstTokenTime: number | null = null;
@@ -343,6 +369,7 @@ type NonStreamContext = {
   forwardResult: ForwardResult;
   client: { id: string; name: string };
   modelId: string;
+  modelPath: string;
   upstream: RawUpstream;
   promptTokens: number | null;
   start: number;
@@ -350,7 +377,7 @@ type NonStreamContext = {
 };
 
 async function handleNonStreamingResponse(c: any, ctx: NonStreamContext) {
-  const { forwardResult, client, modelId, upstream, promptTokens, start, startTime } = ctx;
+  const { forwardResult, client, modelId, modelPath, upstream, promptTokens, start, startTime } = ctx;
 
   const rawBody = forwardResult.body ? await new Response(forwardResult.body).text() : '';
 
@@ -401,7 +428,12 @@ async function handleNonStreamingResponse(c: any, ctx: NonStreamContext) {
     const msg = (parsedBody?.choices as Array<Record<string, unknown>> | undefined)?.[0]?.message;
     const content = msg && typeof msg === 'object' && 'content' in msg ? String(msg.content) : undefined;
     if (typeof content === 'string') {
-      completionTokens = await countCompletionTokens(content, modelId);
+      try {
+        completionTokens = await countCompletionTokens(content, modelPath);
+      } catch (err: unknown) {
+        completionTokens = null;
+        console.warn('[proxy] Tokenizer error (completion):', err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

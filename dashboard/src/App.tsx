@@ -12,9 +12,10 @@ import TimeSeriesChart from './components/TimeSeriesChart';
 import EventLogTable from './components/EventLogTable';
 import ClientsAdmin from './components/ClientsAdmin';
 import UpstreamsAdmin from './components/UpstreamsAdmin';
+import ModelMappingsAdmin from './components/ModelMappingsAdmin';
 import RefreshControl from './components/RefreshControl';
 
-type Tab = 'overview' | 'events' | 'clients' | 'upstreams';
+type Tab = 'overview' | 'events' | 'clients' | 'upstreams' | 'mappings';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -100,6 +101,7 @@ export default function App() {
           { key: 'events' as Tab, label: 'Event Log' },
           { key: 'clients' as Tab, label: 'Clients' },
           { key: 'upstreams' as Tab, label: 'Upstreams' },
+          { key: 'mappings' as Tab, label: 'Mappings' },
         ].map((t) => (
           <button
             key={t.key}
@@ -144,6 +146,7 @@ export default function App() {
         )}
         {tab === 'clients' && <ClientsAdmin />}
         {tab === 'upstreams' && <UpstreamsAdmin />}
+        {tab === 'mappings' && <ModelMappingsAdmin />}
       </main>
     </div>
   );

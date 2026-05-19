@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { loadConfig } from './config.js';
 import clientsRoutes from './routes/clients.js';
 import upstreamsRoutes from './routes/upstreams.js';
+import modelMappingsRoutes from './routes/model-mappings.js';
 import dashboardRoutes from './routes/dashboard.js';
 import proxyRoutes from './routes/proxy.js';
 
@@ -25,6 +26,7 @@ export function createApp(): Hono {
   // API sub-apps (must be before static wildcard)
   app.route('/api/clients', clientsRoutes);
   app.route('/api/upstreams', upstreamsRoutes);
+  app.route('/api/model-mappings', modelMappingsRoutes);
   app.route('/api/dashboard', dashboardRoutes);
   app.route('/v1', proxyRoutes);
 
