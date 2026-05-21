@@ -120,6 +120,29 @@ describe('aggregations service', () => {
         dbCtx.cleanup();
       }
     });
+
+    it('returns weighted tokens-per-second across all records', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await summary();
+        // 2270 completion tokens / (1550ms / 1000) seconds
+        expect(result.tokensPerSecond).not.toBeNull();
+        expect(result.tokensPerSecond!).toBeCloseTo(2270 / 1.55, 3);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('returns null tokensPerSecond when there are no records', async () => {
+      const dbCtx = freshDb();
+      try {
+        const result = await summary();
+        expect(result.tokensPerSecond).toBeNull();
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
   });
 
   describe('breakdown by client', () => {
@@ -155,6 +178,24 @@ describe('aggregations service', () => {
         expect(gptRow!.totalTokens).toBe(3345);
         expect(claudeRow).toBeDefined();
         expect(claudeRow!.totalTokens).toBe(60);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('returns weighted tokens-per-second per group', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const rows = await breakdown('model');
+        const gptRow = rows.find((r) => r.key === 'openai/gpt-4o')!;
+        const claudeRow = rows.find((r) => r.key === 'anthropic/claude-3')!;
+        // gpt-4o: completion 20+10+200+2000 = 2230, latency 100+200+400+500 = 1200
+        expect(gptRow.tokensPerSecond).not.toBeNull();
+        expect(gptRow.tokensPerSecond!).toBeCloseTo(2230 / 1.2, 3);
+        // claude-3: completion 40 (null treated as 0) = 40, latency 50+300 = 350
+        expect(claudeRow.tokensPerSecond).not.toBeNull();
+        expect(claudeRow.tokensPerSecond!).toBeCloseTo(40 / 0.35, 3);
       } finally {
         dbCtx.cleanup();
       }
@@ -227,6 +268,25 @@ describe('aggregations service', () => {
         expect(result.pageSize).toBe(2);
         // Default sort is createdAt desc, so first item should be most recent
         expect(result.items[0].createdAt >= result.items[1].createdAt).toBe(true);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('includes per-row tokensPerSecond and returns null for rows without completion tokens', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({ page: 1, pageSize: 50, sortDir: 'desc' });
+        const successRow = result.items.find(
+          (r) => r.completionTokens === 20 && r.latencyMs === 100,
+        );
+        const errorRow = result.items.find((r) => r.status === 'error');
+        expect(successRow).toBeDefined();
+        expect(successRow!.tokensPerSecond).not.toBeNull();
+        expect(successRow!.tokensPerSecond!).toBeCloseTo(200, 3); // 20 / 0.1s
+        expect(errorRow).toBeDefined();
+        expect(errorRow!.tokensPerSecond).toBeNull();
       } finally {
         dbCtx.cleanup();
       }

@@ -16,13 +16,14 @@ export default function EventLogTable({
 }) {
   const [sort, setSort] = useState<Sort>({ by: 'createdAt', dir: 'desc' });
 
-  const headers: { key: string; label: string }[] = [
+  const headers: { key: string; label: string; sortable?: boolean }[] = [
     { key: 'createdAt', label: 'Timestamp' },
     { key: 'clientName', label: 'Client' },
     { key: 'modelId', label: 'Model' },
     { key: 'upstreamName', label: 'Upstream' },
     { key: 'promptTokens', label: 'Prompt' },
     { key: 'completionTokens', label: 'Completion' },
+    { key: 'tokensPerSecond', label: 'Tokens/sec', sortable: false },
     { key: 'latencyMs', label: 'Latency' },
     { key: 'status', label: 'Status' },
   ];
@@ -45,9 +46,13 @@ export default function EventLogTable({
           <thead>
             <tr>
               {headers.map((h) => (
-                <th key={h.key} onClick={() => toggleSort(h.key)}>
+                <th
+                  key={h.key}
+                  onClick={h.sortable === false ? undefined : () => toggleSort(h.key)}
+                  style={h.sortable === false ? { cursor: 'default' } : undefined}
+                >
                   {h.label}
-                  {sort.by === h.key && (sort.dir === 'asc' ? ' ▲' : ' ▼')}
+                  {h.sortable !== false && sort.by === h.key && (sort.dir === 'asc' ? ' ▲' : ' ▼')}
                 </th>
               ))}
             </tr>
@@ -74,6 +79,9 @@ export default function EventLogTable({
                   <td>{row.upstreamName ?? '—'}</td>
                   <td style={{ fontFamily: 'var(--mono)' }}>{row.promptTokens ?? '—'}</td>
                   <td style={{ fontFamily: 'var(--mono)' }}>{row.completionTokens ?? '—'}</td>
+                  <td style={{ fontFamily: 'var(--mono)' }}>
+                    {row.tokensPerSecond == null ? '—' : row.tokensPerSecond.toFixed(1)}
+                  </td>
                   <td style={{ fontFamily: 'var(--mono)' }}>{row.latencyMs.toLocaleString()}ms</td>
                   <td>
                     <StatusBadge status={row.status} />

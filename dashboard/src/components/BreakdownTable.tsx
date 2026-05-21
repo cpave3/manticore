@@ -20,6 +20,7 @@ export default function BreakdownTable({
               <th style={{ textAlign: 'right' }}>Requests</th>
               <th style={{ textAlign: 'right' }}>Prompt</th>
               <th style={{ textAlign: 'right' }}>Completion</th>
+              <th style={{ textAlign: 'right' }}>Tokens/sec</th>
             </tr>
           </thead>
           <tbody>
@@ -29,6 +30,9 @@ export default function BreakdownTable({
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{r.requests.toLocaleString()}</td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{r.promptTokens.toLocaleString()}</td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{r.completionTokens.toLocaleString()}</td>
+                <td style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>
+                  {r.tokensPerSecond == null ? '—' : r.tokensPerSecond.toFixed(1)}
+                </td>
               </tr>
             ))}
           </tbody>

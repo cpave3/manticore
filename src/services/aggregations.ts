@@ -1,6 +1,7 @@
 import { sql, count, desc, asc, gt, isNotNull } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
 import { logRecords } from '../db/schema.js';
+import { tokensPerSecond } from '../lib/metrics.js';
 import type {
   DashboardSummary,
   DashboardBreakdownRow,
@@ -17,15 +18,20 @@ export async function summary(): Promise<DashboardSummary> {
       totalPromptTokens: sql<number>`COALESCE(SUM(${logRecords.promptTokens}), 0)`,
       totalCompletionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
       totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
+      totalLatencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
     })
     .from(logRecords)
     .get();
 
+  const totalCompletionTokens = Number(row?.totalCompletionTokens ?? 0);
+  const totalLatencyMs = Number(row?.totalLatencyMs ?? 0);
+
   return {
     totalRequests: Number(row?.totalRequests ?? 0),
     totalPromptTokens: Number(row?.totalPromptTokens ?? 0),
-    totalCompletionTokens: Number(row?.totalCompletionTokens ?? 0),
+    totalCompletionTokens,
     totalTokens: Number(row?.totalTokens ?? 0),
+    tokensPerSecond: tokensPerSecond(totalCompletionTokens, totalLatencyMs),
   };
 }
 
@@ -43,6 +49,7 @@ export async function breakdown(
         promptTokens: sql<number>`COALESCE(SUM(${logRecords.promptTokens}), 0)`,
         completionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
         totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
+        latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
       })
       .from(logRecords)
       .groupBy(logRecords.clientId, logRecords.clientName)
@@ -56,6 +63,7 @@ export async function breakdown(
       promptTokens: Number(r.promptTokens),
       completionTokens: Number(r.completionTokens),
       totalTokens: Number(r.totalTokens),
+      tokensPerSecond: tokensPerSecond(Number(r.completionTokens), Number(r.latencyMs)),
     }));
   }
 
@@ -68,6 +76,7 @@ export async function breakdown(
         promptTokens: sql<number>`COALESCE(SUM(${logRecords.promptTokens}), 0)`,
         completionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
         totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
+        latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
       })
       .from(logRecords)
       .groupBy(logRecords.modelId)
@@ -81,6 +90,7 @@ export async function breakdown(
       promptTokens: Number(r.promptTokens),
       completionTokens: Number(r.completionTokens),
       totalTokens: Number(r.totalTokens),
+      tokensPerSecond: tokensPerSecond(Number(r.completionTokens), Number(r.latencyMs)),
     }));
   }
 
@@ -93,6 +103,7 @@ export async function breakdown(
       promptTokens: sql<number>`COALESCE(SUM(${logRecords.promptTokens}), 0)`,
       completionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
       totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
+      latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
     })
     .from(logRecords)
     .where(isNotNull(logRecords.upstreamName))
@@ -107,6 +118,7 @@ export async function breakdown(
     promptTokens: Number(r.promptTokens),
     completionTokens: Number(r.completionTokens),
     totalTokens: Number(r.totalTokens),
+    tokensPerSecond: tokensPerSecond(Number(r.completionTokens), Number(r.latencyMs)),
   }));
 }
 
@@ -196,6 +208,7 @@ export async function eventLog(params: {
     statusCode: row.statusCode ?? null,
     errorMessage: row.errorMessage ?? null,
     createdAt: row.createdAt.toISOString(),
+    tokensPerSecond: tokensPerSecond(row.completionTokens, row.latencyMs),
   }));
 
   return {

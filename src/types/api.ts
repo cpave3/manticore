@@ -39,6 +39,7 @@ export type LogRecordResponse = {
   statusCode: number | null;
   errorMessage: string | null;
   createdAt: string;
+  tokensPerSecond: number | null;
 };
 
 export type DashboardSummary = {
@@ -46,6 +47,7 @@ export type DashboardSummary = {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalTokens: number;
+  tokensPerSecond: number | null;
 };
 
 export type DashboardBreakdownRow = {
@@ -55,6 +57,7 @@ export type DashboardBreakdownRow = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  tokensPerSecond: number | null;
 };
 
 export type DashboardTimeSeriesPoint = {
