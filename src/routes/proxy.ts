@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { apiKeyAuth } from '../middleware/auth.js';
+import { extractSessionId } from '../middleware/session.js';
 import { findUpstreamByName, findUpstreamById, type RawUpstream } from '../services/upstreams.js';
 import { parseModelId } from '../services/model-id.js';
 import { resolveModelMapping } from '../services/model-mappings.js';
@@ -45,7 +46,7 @@ app.onError((err, c) => {
   return c.json(buildApiError(message, 'internal_server_error'), 500);
 });
 
-app.use('/chat/completions', apiKeyAuth());
+app.use('/chat/completions', apiKeyAuth(), extractSessionId());
 
 app.post('/chat/completions', async (c) => {
   const start = Date.now();
@@ -108,6 +109,7 @@ app.post('/chat/completions', async (c) => {
       clientName: client.name,
       modelId,
       upstream: null,
+      sessionId: c.var.sessionId,
       promptTokens: null,
       completionTokens: null,
       totalTokens: null,
@@ -156,6 +158,7 @@ app.post('/chat/completions', async (c) => {
         clientName: client.name,
         modelId,
         upstream,
+        sessionId: c.var.sessionId,
         promptTokens,
         completionTokens: null,
         totalTokens: promptTokens,
@@ -171,6 +174,8 @@ app.post('/chat/completions', async (c) => {
     return c.json(buildApiError(`Upstream request failed: ${msg}`, 'api_error'), 502);
   }
 
+  const sessionId = c.var.sessionId;
+
   // 8. Streaming
   if (isStream) {
     return handleStreamingResponse(c, {
@@ -179,6 +184,7 @@ app.post('/chat/completions', async (c) => {
       modelId,
       modelPath,
       upstream,
+      sessionId,
       promptTokens,
       start,
       startTime,
@@ -192,6 +198,7 @@ app.post('/chat/completions', async (c) => {
     modelId,
     modelPath,
     upstream,
+    sessionId,
     promptTokens,
     start,
     startTime,
@@ -221,13 +228,14 @@ type StreamContext = {
   modelId: string;
   modelPath: string;
   upstream: RawUpstream;
+  sessionId: string | null;
   promptTokens: number | null;
   start: number;
   startTime: Date;
 };
 
 async function handleStreamingResponse(c: any, ctx: StreamContext) {
-  const { forwardResult, client, modelId, modelPath, upstream, promptTokens, start, startTime } = ctx;
+  const { forwardResult, client, modelId, modelPath, upstream, sessionId, promptTokens, start, startTime } = ctx;
 
   const counter = await getStreamCounter(modelPath);
   const decoder = new TextDecoder();
@@ -257,6 +265,7 @@ async function handleStreamingResponse(c: any, ctx: StreamContext) {
         clientName: client.name,
         modelId,
         upstream,
+        sessionId,
         promptTokens: p,
         completionTokens: comp,
         totalTokens: t,
@@ -373,13 +382,14 @@ type NonStreamContext = {
   modelId: string;
   modelPath: string;
   upstream: RawUpstream;
+  sessionId: string | null;
   promptTokens: number | null;
   start: number;
   startTime: Date;
 };
 
 async function handleNonStreamingResponse(c: any, ctx: NonStreamContext) {
-  const { forwardResult, client, modelId, modelPath, upstream, promptTokens, start, startTime } = ctx;
+  const { forwardResult, client, modelId, modelPath, upstream, sessionId, promptTokens, start, startTime } = ctx;
 
   const rawBody = forwardResult.body ? await new Response(forwardResult.body).text() : '';
 
@@ -399,6 +409,7 @@ async function handleNonStreamingResponse(c: any, ctx: NonStreamContext) {
         clientName: client.name,
         modelId,
         upstream,
+        sessionId,
         promptTokens,
         completionTokens: null,
         totalTokens: promptTokens,
@@ -454,6 +465,7 @@ async function handleNonStreamingResponse(c: any, ctx: NonStreamContext) {
       clientName: client.name,
       modelId,
       upstream,
+      sessionId,
       promptTokens: p,
       completionTokens: comp,
       totalTokens: t,

@@ -287,6 +287,7 @@ describe('aggregations service', () => {
         expect(successRow!.tokensPerSecond!).toBeCloseTo(200, 3); // 20 / 0.1s
         expect(errorRow).toBeDefined();
         expect(errorRow!.tokensPerSecond).toBeNull();
+        expect(successRow!.sessionId).toBeNull();
       } finally {
         dbCtx.cleanup();
       }
@@ -306,6 +307,152 @@ describe('aggregations service', () => {
         for (let i = 1; i < result.items.length; i++) {
           expect(result.items[i].latencyMs).toBeGreaterThanOrEqual(result.items[i - 1].latencyMs);
         }
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+  });
+
+  describe('breakdown by session', () => {
+    it('groups by sessionId with correct sums, excludes null, ordered by totalTokens desc', async () => {
+      const dbCtx = freshDb();
+      try {
+        const { db } = dbCtx;
+        const client = await makeClient(db, { name: 'Test Client' });
+        const upstream = await makeUpstream(db, { name: 'fake', baseUrl: 'http://example.com' });
+
+        await makeLogRecord(db, {
+          clientId: client.id,
+          clientName: client.name,
+          upstreamId: upstream.id,
+          upstreamName: upstream.name,
+          sessionId: 'session-a',
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+          latencyMs: 100,
+          createdAt: new Date(),
+          status: 'success',
+        });
+        await makeLogRecord(db, {
+          clientId: client.id,
+          clientName: client.name,
+          upstreamId: upstream.id,
+          upstreamName: upstream.name,
+          sessionId: 'session-a',
+          promptTokens: 5,
+          completionTokens: 10,
+          totalTokens: 15,
+          latencyMs: 50,
+          createdAt: new Date(),
+          status: 'success',
+        });
+        await makeLogRecord(db, {
+          clientId: client.id,
+          clientName: client.name,
+          upstreamId: upstream.id,
+          upstreamName: upstream.name,
+          sessionId: 'session-b',
+          promptTokens: 20,
+          completionTokens: 40,
+          totalTokens: 60,
+          latencyMs: 200,
+          createdAt: new Date(),
+          status: 'success',
+        });
+        await makeLogRecord(db, {
+          clientId: client.id,
+          clientName: client.name,
+          upstreamId: upstream.id,
+          upstreamName: upstream.name,
+          sessionId: null,
+          promptTokens: 1,
+          completionTokens: 2,
+          totalTokens: 3,
+          latencyMs: 10,
+          createdAt: new Date(),
+          status: 'success',
+        });
+
+        const rows = await breakdown('session');
+        expect(rows.length).toBe(2);
+        expect(rows[0].key).toBe('session-b');
+        expect(rows[0].totalTokens).toBe(60);
+        expect(rows[1].key).toBe('session-a');
+        expect(rows[1].totalTokens).toBe(45);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('filters to a single client when clientId is provided', async () => {
+      const dbCtx = freshDb();
+      try {
+        const { db } = dbCtx;
+        const clientA = await makeClient(db, { name: 'Client A' });
+        const clientB = await makeClient(db, { name: 'Client B' });
+        const upstream = await makeUpstream(db, { name: 'fake', baseUrl: 'http://example.com' });
+
+        await makeLogRecord(db, {
+          clientId: clientA.id,
+          clientName: clientA.name,
+          upstreamId: upstream.id,
+          upstreamName: upstream.name,
+          sessionId: 'sess-a',
+          promptTokens: 10,
+          completionTokens: 20,
+          totalTokens: 30,
+          latencyMs: 100,
+          createdAt: new Date(),
+          status: 'success',
+        });
+        await makeLogRecord(db, {
+          clientId: clientB.id,
+          clientName: clientB.name,
+          upstreamId: upstream.id,
+          upstreamName: upstream.name,
+          sessionId: 'sess-b',
+          promptTokens: 100,
+          completionTokens: 200,
+          totalTokens: 300,
+          latencyMs: 1000,
+          createdAt: new Date(),
+          status: 'success',
+        });
+
+        const rowsA = await breakdown('session', undefined, clientA.id);
+        expect(rowsA.length).toBe(1);
+        expect(rowsA[0].key).toBe('sess-a');
+        expect(rowsA[0].totalTokens).toBe(30);
+
+        const rowsB = await breakdown('session', undefined, clientB.id);
+        expect(rowsB.length).toBe(1);
+        expect(rowsB[0].key).toBe('sess-b');
+        expect(rowsB[0].totalTokens).toBe(300);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+  });
+
+  describe('eventLog sessionId', () => {
+    it('returns sessionId when it is set', async () => {
+      const dbCtx = freshDb();
+      try {
+        const { db } = dbCtx;
+        const client = await makeClient(db, { name: 'Test Client' });
+        await makeLogRecord(db, {
+          clientId: client.id,
+          clientName: client.name,
+          sessionId: 'thread-42',
+          latencyMs: 100,
+          createdAt: new Date(),
+          status: 'success',
+        });
+
+        const result = await eventLog({ page: 1, pageSize: 50, sortDir: 'desc' });
+        expect(result.items.length).toBe(1);
+        expect(result.items[0].sessionId).toBe('thread-42');
       } finally {
         dbCtx.cleanup();
       }

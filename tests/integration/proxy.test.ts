@@ -422,6 +422,167 @@ describe('proxy integration', () => {
     });
   });
 
+  it('non-streaming success with X-Session-Id — sessionId in LogRecord', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      await makeUpstream(db, { name: 'fake', baseUrl: 'http://example.com' });
+
+      const fetchMock = mockFetchOk({
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+      });
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      try {
+        const res = await proxyApp.request('/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${client.apiKey}`,
+            'X-Session-Id': 'thread-42',
+          },
+          body: JSON.stringify({ model: 'fake/gpt-4', messages: [{ role: 'user', content: 'hello' }] }),
+        });
+
+        expect(res.status).toBe(200);
+
+        const rows = await getLogRows(db);
+        const row = rows.find((r) => r.modelId === 'fake/gpt-4');
+        expect(row).toBeDefined();
+        expect(row!.sessionId).toBe('thread-42');
+        expect(row!.status).toBe('success');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  it('non-streaming upstream error with X-Session-Id — sessionId in LogRecord', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      await makeUpstream(db, { name: 'fake', baseUrl: 'http://example.com' });
+
+      const fetchMock = mockFetchError(502, { error: { message: 'bad gateway' } });
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      try {
+        const res = await proxyApp.request('/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${client.apiKey}`,
+            'X-Session-Id': 'thread-43',
+          },
+          body: JSON.stringify({ model: 'fake/gpt-4', messages: [{ role: 'user', content: 'hello' }] }),
+        });
+
+        expect(res.status).toBe(502);
+
+        const rows = await getLogRows(db);
+        const row = rows.find((r) => r.modelId === 'fake/gpt-4');
+        expect(row).toBeDefined();
+        expect(row!.sessionId).toBe('thread-43');
+        expect(row!.status).toBe('error');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  it('streaming success with X-Session-Id — sessionId in LogRecord', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      await makeUpstream(db, { name: 'fake', baseUrl: 'http://example.com' });
+
+      const stream = sseStream([
+        'data: {"choices":[{"delta":{"content":"a"}}]}',
+        '',
+        'data: {"choices":[{"delta":{"content":"b"}}]}',
+        '',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":2,"total_tokens":4}}',
+        '',
+        'data: [DONE]',
+        '',
+      ]);
+
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      );
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      try {
+        const res = await proxyApp.request('/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${client.apiKey}`,
+            'X-Session-Id': 'thread-44',
+          },
+          body: JSON.stringify({ model: 'fake/gpt-4', messages: [{ role: 'user', content: 'hi' }], stream: true }),
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toContain('text/event-stream');
+
+        const reader = res.body!.getReader();
+        while (true) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+
+        await new Promise((r) => setTimeout(r, 300));
+
+        const rows = await getLogRows(db);
+        const row = rows.find((r) => r.modelId === 'fake/gpt-4');
+        expect(row).toBeDefined();
+        expect(row!.sessionId).toBe('thread-44');
+        expect(row!.status).toBe('success');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  it('request without X-Session-Id — sessionId is null in LogRecord', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      await makeUpstream(db, { name: 'fake', baseUrl: 'http://example.com' });
+
+      const fetchMock = mockFetchOk({
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }],
+      });
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      try {
+        const res = await proxyApp.request('/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${client.apiKey}`,
+          },
+          body: JSON.stringify({ model: 'fake/gpt-4', messages: [{ role: 'user', content: 'hello' }] }),
+        });
+
+        expect(res.status).toBe(200);
+
+        const rows = await getLogRows(db);
+        const row = rows.find((r) => r.modelId === 'fake/gpt-4');
+        expect(row).toBeDefined();
+        expect(row!.sessionId).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   it('reject /v1/embeddings — 404 mentioning chat completions', async () => {
     await withFreshDb(async () => {
       const res = await proxyApp.request('/embeddings', {

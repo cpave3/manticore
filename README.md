@@ -84,6 +84,24 @@ curl -s -X POST http://localhost:3456/v1/chat/completions \
   }'
 ```
 
+### Session correlation
+
+You can optionally pass an `X-Session-Id` header to group related requests (e.g. a chat thread or multi-turn workflow). The value is persisted in the request's LogRecord for per-session reporting, and is never forwarded to upstream providers.
+
+```bash
+curl -s -X POST http://localhost:3456/v1/chat/completions \
+  -H "authorization: Bearer $MANTICORE_API_KEY" \
+  -H 'content-type: application/json' \
+  -H 'x-session-id: thread-42' \
+  -d '{
+    "model": "ollama/qwen2.5:0.5b",
+    "messages": [{"role":"user","content":"Say hello"}],
+    "stream": false
+  }'
+```
+
+> Values over 1024 characters are silently truncated. Empty or whitespace-only values are treated as absent.
+
 ---
 
 ## Dashboard

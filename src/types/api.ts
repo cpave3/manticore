@@ -29,6 +29,7 @@ export type LogRecordResponse = {
   modelId: string;
   upstreamId: string | null;
   upstreamName: string | null;
+  sessionId: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;

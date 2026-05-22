@@ -10,6 +10,7 @@ export function buildLogRecord(params: {
   clientName: string;
   modelId: string;
   upstream: RawUpstream | null;
+  sessionId?: string | null;
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
@@ -28,6 +29,7 @@ export function buildLogRecord(params: {
     modelId: params.modelId,
     upstreamId: params.upstream?.id ?? null,
     upstreamName: params.upstream?.name ?? null,
+    sessionId: params.sessionId ?? null,
     promptTokens: params.promptTokens,
     completionTokens: params.completionTokens,
     totalTokens: params.totalTokens,

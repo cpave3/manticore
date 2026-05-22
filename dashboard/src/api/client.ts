@@ -117,8 +117,12 @@ export function dashboardSummary(params?: { startDate?: string; endDate?: string
   return fetchJson<DashboardSummary>(`/dashboard/summary${query ? `?${query}` : ''}`);
 }
 
-export function dashboardBreakdown(by: 'client' | 'model' | 'upstream', params?: { startDate?: string; endDate?: string }) {
+export function dashboardBreakdown(
+  by: 'client' | 'model' | 'upstream' | 'session',
+  params?: { clientId?: string; startDate?: string; endDate?: string }
+) {
   const qs = new URLSearchParams();
+  if (params?.clientId) qs.set('clientId', params.clientId);
   if (params?.startDate) qs.set('startDate', params.startDate);
   if (params?.endDate) qs.set('endDate', params.endDate);
   const query = qs.toString();

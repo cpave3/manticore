@@ -29,6 +29,7 @@ export default function App() {
   const [breakdownClient, setBreakdownClient] = useState<DashboardBreakdownRow[]>([]);
   const [breakdownModel, setBreakdownModel] = useState<DashboardBreakdownRow[]>([]);
   const [breakdownUpstream, setBreakdownUpstream] = useState<DashboardBreakdownRow[]>([]);
+  const [breakdownSession, setBreakdownSession] = useState<DashboardBreakdownRow[]>([]);
   const [timeSeries, setTimeSeries] = useState<DashboardTimeSeriesPoint[]>([]);
 
   // Events state
@@ -41,17 +42,19 @@ export default function App() {
     setError(null);
     try {
       const qs = dateRange ? { startDate: dateRange.start, endDate: dateRange.end } : undefined;
-      const [s, bc, bm, bu, ts] = await Promise.all([
+      const [s, bc, bm, bu, bs, ts] = await Promise.all([
         dashboardSummary(qs),
         dashboardBreakdown('client', qs),
         dashboardBreakdown('model', qs),
         dashboardBreakdown('upstream', qs),
+        dashboardBreakdown('session', qs),
         dashboardTimeSeries({ bucket: 'hour', ...qs }),
       ]);
       setSummary(s);
       setBreakdownClient(bc);
       setBreakdownModel(bm);
       setBreakdownUpstream(bu);
+      setBreakdownSession(bs);
       setTimeSeries(ts);
     } catch (e) {
       setError((e as Error).message);
@@ -134,7 +137,16 @@ export default function App() {
             <SummaryCards data={summary} />
             <TimeSeriesChart data={timeSeries} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-              <BreakdownTable title="By Client" rows={breakdownClient} />
+              <BreakdownTable
+                title="By Client"
+                rows={breakdownClient}
+                expandable
+                onExpandRow={async (clientId) => {
+                  const qs = dateRange ? { startDate: dateRange.start, endDate: dateRange.end, clientId } : { clientId };
+                  return dashboardBreakdown('session', qs);
+                }}
+              />
+              <BreakdownTable title="By Session" rows={breakdownSession} />
               <BreakdownTable title="By Model" rows={breakdownModel} />
               <BreakdownTable title="By Upstream" rows={breakdownUpstream} />
             </div>

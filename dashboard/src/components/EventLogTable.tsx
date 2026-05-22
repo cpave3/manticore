@@ -19,6 +19,7 @@ export default function EventLogTable({
   const headers: { key: string; label: string; sortable?: boolean }[] = [
     { key: 'createdAt', label: 'Timestamp' },
     { key: 'clientName', label: 'Client' },
+    { key: 'sessionId', label: 'Session' },
     { key: 'modelId', label: 'Model' },
     { key: 'upstreamName', label: 'Upstream' },
     { key: 'promptTokens', label: 'Prompt' },
@@ -75,6 +76,7 @@ export default function EventLogTable({
                 <tr key={row.id}>
                   <td>{new Date(row.createdAt).toLocaleString()}</td>
                   <td>{row.clientName}</td>
+                  <td>{row.sessionId ?? '—'}</td>
                   <td>{row.modelId}</td>
                   <td>{row.upstreamName ?? '—'}</td>
                   <td style={{ fontFamily: 'var(--mono)' }}>{row.promptTokens ?? '—'}</td>

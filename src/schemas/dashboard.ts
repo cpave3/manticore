@@ -6,7 +6,8 @@ export const summaryQuerySchema = z.object({
 });
 
 export const breakdownQuerySchema = z.object({
-  groupBy: z.enum(['client', 'model', 'upstream']),
+  groupBy: z.enum(['client', 'model', 'upstream', 'session']),
+  clientId: z.string().uuid().optional(),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
 });

@@ -41,6 +41,7 @@ export const logRecords = sqliteTable('log_records', {
   modelId: text('model_id').notNull(),
   upstreamId: text('upstream_id'),
   upstreamName: text('upstream_name'),
+  sessionId: text('session_id'),
   promptTokens: integer('prompt_tokens'),
   completionTokens: integer('completion_tokens'),
   totalTokens: integer('total_tokens'),
@@ -54,6 +55,7 @@ export const logRecords = sqliteTable('log_records', {
 }, (table) => [
   index('log_records_client_id_idx').on(table.clientId),
   index('log_records_upstream_id_idx').on(table.upstreamId),
+  index('log_records_session_id_idx').on(table.sessionId),
   index('log_records_created_at_idx').on(table.createdAt),
 ]);
 

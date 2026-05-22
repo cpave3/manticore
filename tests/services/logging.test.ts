@@ -48,6 +48,29 @@ describe('logging service', () => {
       expect(record.statusCode).toBe(200);
       expect(record.errorMessage).toBeNull();
       expect(record.createdAt).toEqual(new Date('2024-01-02T12:00:00Z'));
+      expect(record.sessionId).toBeNull();
+    });
+
+    it('accepts and returns sessionId when provided', () => {
+      const record = buildLogRecord({
+        clientId: 'client-id',
+        clientName: 'Test Client',
+        modelId: 'openai/gpt-4o',
+        upstream: null,
+        sessionId: 'my-session-1',
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+        latencyMs: 150,
+        timeToFirstTokenMs: 50,
+        finishReason: 'stop',
+        status: 'success',
+        statusCode: 200,
+        errorMessage: null,
+        startTime: new Date('2024-01-02T12:00:00Z'),
+      });
+
+      expect(record.sessionId).toBe('my-session-1');
     });
 
     it('snapshots null upstream fields when upstream is null', () => {
@@ -105,6 +128,7 @@ describe('logging service', () => {
         expect(rows.length).toBe(1);
         expect(rows[0].clientId).toBe('client-id');
         expect(rows[0].latencyMs).toBe(200);
+        expect(rows[0].sessionId).toBeNull();
       } finally {
         dbCtx.cleanup();
       }

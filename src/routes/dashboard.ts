@@ -46,7 +46,7 @@ app.get('/breakdown/:groupBy', async (c) => {
   if (!parsed.success) {
     return c.json(buildApiError(formatZodMessage(parsed.error), 'invalid_request_error'), 400);
   }
-  const result = await breakdown(parsed.data.groupBy, toDateRange(parsed.data));
+  const result = await breakdown(parsed.data.groupBy, toDateRange(parsed.data), parsed.data.clientId);
   return c.json(result);
 });
 

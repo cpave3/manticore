@@ -1,4 +1,4 @@
-import { sql, count, desc, asc, gte, lte, and, gt, isNotNull } from 'drizzle-orm';
+import { sql, count, desc, asc, gte, lte, and, gt, eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
 import { logRecords } from '../db/schema.js';
 import { tokensPerSecond } from '../lib/metrics.js';
@@ -45,11 +45,14 @@ export async function summary(range?: { start?: Date; end?: Date }): Promise<Das
 }
 
 export async function breakdown(
-  groupBy: 'client' | 'model' | 'upstream',
+  groupBy: 'client' | 'model' | 'upstream' | 'session',
   range?: { start?: Date; end?: Date },
+  clientId?: string,
 ): Promise<DashboardBreakdownRow[]> {
   const db = getDb();
-  const where = dateFilters(range?.start, range?.end);
+  const baseFilters = dateFilters(range?.start, range?.end);
+  const clientFilter = clientId ? eq(logRecords.clientId, clientId) : undefined;
+  const where = baseFilters && clientFilter ? and(baseFilters, clientFilter) : clientFilter ?? baseFilters;
 
   if (groupBy === 'client') {
     const rows = await db
@@ -99,6 +102,37 @@ export async function breakdown(
     return rows.map((r) => ({
       key: r.key,
       label: r.label,
+      requests: Number(r.requests),
+      promptTokens: Number(r.promptTokens),
+      completionTokens: Number(r.completionTokens),
+      totalTokens: Number(r.totalTokens),
+      tokensPerSecond: tokensPerSecond(Number(r.completionTokens), Number(r.latencyMs)),
+    }));
+  }
+
+  if (groupBy === 'session') {
+    const sessionWhere = where
+      ? and(where, isNotNull(logRecords.sessionId))
+      : isNotNull(logRecords.sessionId);
+    const rows = await db
+      .select({
+        key: logRecords.sessionId,
+        label: logRecords.sessionId,
+        requests: count(),
+        promptTokens: sql<number>`COALESCE(SUM(${logRecords.promptTokens}), 0)`,
+        completionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
+        totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
+        latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
+      })
+      .from(logRecords)
+      .where(sessionWhere)
+      .groupBy(logRecords.sessionId)
+      .orderBy(desc(sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`))
+      .all();
+
+    return rows.map((r) => ({
+      key: r.key!,
+      label: r.label!,
       requests: Number(r.requests),
       promptTokens: Number(r.promptTokens),
       completionTokens: Number(r.completionTokens),
@@ -223,6 +257,7 @@ export async function eventLog(params: {
     modelId: row.modelId,
     upstreamId: row.upstreamId ?? null,
     upstreamName: row.upstreamName ?? null,
+    sessionId: row.sessionId ?? null,
     promptTokens: row.promptTokens ?? null,
     completionTokens: row.completionTokens ?? null,
     totalTokens: row.totalTokens ?? null,
