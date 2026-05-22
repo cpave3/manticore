@@ -1,4 +1,4 @@
-import { sql, count, desc, asc, gt, isNotNull } from 'drizzle-orm';
+import { sql, count, desc, asc, gte, lte, and, gt, isNotNull } from 'drizzle-orm';
 import { getDb } from '../db/client.js';
 import { logRecords } from '../db/schema.js';
 import { tokensPerSecond } from '../lib/metrics.js';
@@ -10,8 +10,16 @@ import type {
   LogRecordResponse,
 } from '../types/api.js';
 
-export async function summary(): Promise<DashboardSummary> {
+function dateFilters(start?: Date, end?: Date) {
+  const filters = [];
+  if (start) filters.push(gte(logRecords.createdAt, start));
+  if (end) filters.push(lte(logRecords.createdAt, end));
+  return filters.length > 0 ? and(...filters) : undefined;
+}
+
+export async function summary(range?: { start?: Date; end?: Date }): Promise<DashboardSummary> {
   const db = getDb();
+  const where = dateFilters(range?.start, range?.end);
   const row = await db
     .select({
       totalRequests: count(),
@@ -21,6 +29,7 @@ export async function summary(): Promise<DashboardSummary> {
       totalLatencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
     })
     .from(logRecords)
+    .where(where)
     .get();
 
   const totalCompletionTokens = Number(row?.totalCompletionTokens ?? 0);
@@ -37,8 +46,10 @@ export async function summary(): Promise<DashboardSummary> {
 
 export async function breakdown(
   groupBy: 'client' | 'model' | 'upstream',
+  range?: { start?: Date; end?: Date },
 ): Promise<DashboardBreakdownRow[]> {
   const db = getDb();
+  const where = dateFilters(range?.start, range?.end);
 
   if (groupBy === 'client') {
     const rows = await db
@@ -52,6 +63,7 @@ export async function breakdown(
         latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
       })
       .from(logRecords)
+      .where(where)
       .groupBy(logRecords.clientId, logRecords.clientName)
       .orderBy(desc(sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`))
       .all();
@@ -79,6 +91,7 @@ export async function breakdown(
         latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
       })
       .from(logRecords)
+      .where(where)
       .groupBy(logRecords.modelId)
       .orderBy(desc(sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`))
       .all();
@@ -95,6 +108,9 @@ export async function breakdown(
   }
 
   // upstream
+  const upstreamWhere = where
+    ? and(where, isNotNull(logRecords.upstreamName))
+    : isNotNull(logRecords.upstreamName);
   const rows = await db
     .select({
       key: logRecords.upstreamName,
@@ -106,7 +122,7 @@ export async function breakdown(
       latencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
     })
     .from(logRecords)
-    .where(isNotNull(logRecords.upstreamName))
+    .where(upstreamWhere)
     .groupBy(logRecords.upstreamName)
     .orderBy(desc(sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`))
     .all();
@@ -124,6 +140,7 @@ export async function breakdown(
 
 export async function timeSeries(
   bucket: 'hour' | 'day',
+  range?: { start?: Date; end?: Date },
 ): Promise<DashboardTimeSeriesPoint[]> {
   const db = getDb();
 
@@ -132,11 +149,15 @@ export async function timeSeries(
       ? sql<string>`strftime('%Y-%m-%dT%H:00:00Z', ${logRecords.createdAt} / 1000, 'unixepoch')`
       : sql<string>`strftime('%Y-%m-%dT00:00:00Z', ${logRecords.createdAt} / 1000, 'unixepoch')`;
 
-  const cutoffMs =
-    bucket === 'hour'
-      ? Date.now() - 24 * 60 * 60 * 1000
-      : Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const cutoff = new Date(cutoffMs);
+  let userFilter = dateFilters(range?.start, range?.end);
+  if (!range?.start && !range?.end) {
+    // Default cutoff when no range provided (preserve existing behavior)
+    const cutoffMs =
+      bucket === 'hour'
+        ? Date.now() - 24 * 60 * 60 * 1000
+        : Date.now() - 30 * 24 * 60 * 60 * 1000;
+    userFilter = gt(logRecords.createdAt, new Date(cutoffMs));
+  }
 
   const rows = await db
     .select({
@@ -146,7 +167,7 @@ export async function timeSeries(
       completionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
     })
     .from(logRecords)
-    .where(gt(logRecords.createdAt, cutoff))
+    .where(userFilter)
     .groupBy(bucketExpr)
     .orderBy(asc(bucketExpr))
     .all();
@@ -171,11 +192,14 @@ export async function eventLog(params: {
   pageSize: number;
   sortBy?: string;
   sortDir: 'asc' | 'desc';
+  start?: Date;
+  end?: Date;
 }): Promise<EventLogResponse> {
   const db = getDb();
-  const { page, pageSize, sortBy, sortDir } = params;
+  const { page, pageSize, sortBy, sortDir, start, end } = params;
+  const where = dateFilters(start, end);
 
-  const totalRow = await db.select({ count: count() }).from(logRecords).get();
+  const totalRow = await db.select({ count: count() }).from(logRecords).where(where).get();
   const total = Number(totalRow?.count ?? 0);
 
   const orderFn = sortDir === 'desc' ? desc : asc;
@@ -186,6 +210,7 @@ export async function eventLog(params: {
   const rows = await db
     .select()
     .from(logRecords)
+    .where(where)
     .orderBy(orderFn(orderCol))
     .limit(pageSize)
     .offset((page - 1) * pageSize)

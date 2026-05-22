@@ -109,17 +109,27 @@ export function deleteModelMapping(id: string) {
   return fetchJson<void>(`/model-mappings/${id}`, { method: 'DELETE' });
 }
 
-export function dashboardSummary() {
-  return fetchJson<DashboardSummary>('/dashboard/summary');
+export function dashboardSummary(params?: { startDate?: string; endDate?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.startDate) qs.set('startDate', params.startDate);
+  if (params?.endDate) qs.set('endDate', params.endDate);
+  const query = qs.toString();
+  return fetchJson<DashboardSummary>(`/dashboard/summary${query ? `?${query}` : ''}`);
 }
 
-export function dashboardBreakdown(by: 'client' | 'model' | 'upstream') {
-  return fetchJson<DashboardBreakdownRow[]>(`/dashboard/breakdown/${by}`);
+export function dashboardBreakdown(by: 'client' | 'model' | 'upstream', params?: { startDate?: string; endDate?: string }) {
+  const qs = new URLSearchParams();
+  if (params?.startDate) qs.set('startDate', params.startDate);
+  if (params?.endDate) qs.set('endDate', params.endDate);
+  const query = qs.toString();
+  return fetchJson<DashboardBreakdownRow[]>(`/dashboard/breakdown/${by}${query ? `?${query}` : ''}`);
 }
 
-export function dashboardTimeSeries(params: { bucket: 'hour' | 'day' }) {
+export function dashboardTimeSeries(params: { bucket: 'hour' | 'day'; startDate?: string; endDate?: string }) {
   const qs = new URLSearchParams();
   qs.set('bucket', params.bucket);
+  if (params.startDate) qs.set('startDate', params.startDate);
+  if (params.endDate) qs.set('endDate', params.endDate);
   return fetchJson<DashboardTimeSeriesPoint[]>(`/dashboard/time-series?${qs}`);
 }
 
@@ -128,11 +138,15 @@ export function eventLog(params: {
   pageSize: number;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
+  startDate?: string;
+  endDate?: string;
 }) {
   const qs = new URLSearchParams();
   qs.set('page', String(params.page));
   qs.set('pageSize', String(params.pageSize));
   if (params.sortBy) qs.set('sortBy', params.sortBy);
   if (params.sortDir) qs.set('sortDir', params.sortDir);
+  if (params.startDate) qs.set('startDate', params.startDate);
+  if (params.endDate) qs.set('endDate', params.endDate);
   return fetchJson<EventLogResponse>(`/dashboard/events?${qs}`);
 }

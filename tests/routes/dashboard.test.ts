@@ -111,12 +111,105 @@ describe('dashboard routes', () => {
     });
   });
 
+  it('GET /summary?startDate filters out older records', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { createdAt: new Date('2024-01-01T00:00:00Z'), totalTokens: 100 });
+      await makeLogRecord(db, { createdAt: new Date('2024-06-15T12:00:00Z'), totalTokens: 200 });
+
+      const res = await dashboardApp.request('/summary?startDate=2024-06-01T00:00:00Z');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.totalRequests).toBe(1);
+      expect(body.totalTokens).toBe(200);
+    });
+  });
+
+  it('GET /summary?endDate filters out newer records', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { createdAt: new Date('2024-01-01T00:00:00Z'), totalTokens: 100 });
+      await makeLogRecord(db, { createdAt: new Date('2024-06-15T12:00:00Z'), totalTokens: 200 });
+
+      const res = await dashboardApp.request('/summary?endDate=2024-02-01T00:00:00Z');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.totalRequests).toBe(1);
+      expect(body.totalTokens).toBe(100);
+    });
+  });
+
+  it('GET /breakdown/client?startDate respects range', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { clientId: 'c1', clientName: 'Alice', createdAt: new Date('2024-01-01T00:00:00Z'), totalTokens: 100 });
+      await makeLogRecord(db, { clientId: 'c1', clientName: 'Alice', createdAt: new Date('2024-06-15T12:00:00Z'), totalTokens: 200 });
+
+      const res = await dashboardApp.request('/breakdown/client?startDate=2024-06-01T00:00:00Z');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.length).toBe(1);
+      expect(body[0].totalTokens).toBe(200);
+    });
+  });
+
+  it('GET /time-series?startDate&endDate returns custom range', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { createdAt: new Date('2024-01-01T10:00:00Z'), promptTokens: 5 });
+      await makeLogRecord(db, { createdAt: new Date('2024-01-02T10:00:00Z'), promptTokens: 10 });
+      await makeLogRecord(db, { createdAt: new Date('2024-01-03T10:00:00Z'), promptTokens: 15 });
+
+      const res = await dashboardApp.request('/time-series?bucket=day&startDate=2024-01-01T00:00:00Z&endDate=2024-01-02T23:59:59Z');
+      expect(res.status).toBe(200);
+      const body = await res.json() as { promptTokens: number }[];
+      expect(body.length).toBe(2);
+      expect(body.reduce((s: number, p: { promptTokens: number }) => s + p.promptTokens, 0)).toBe(15);
+    });
+  });
+
+  it('GET /events?startDate&endDate filters log', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { createdAt: new Date('2024-01-01T00:00:00Z'), totalTokens: 100 });
+      await makeLogRecord(db, { createdAt: new Date('2024-06-01T00:00:00Z'), totalTokens: 200 });
+
+      const res = await dashboardApp.request('/events?page=1&pageSize=50&startDate=2024-05-01T00:00:00Z&endDate=2024-12-31T23:59:59Z');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.items.length).toBe(1);
+      expect(body.total).toBe(1);
+    });
+  });
+
   it('GET /events?sortBy=garbage returns 400', async () => {
     await withFreshDb(async () => {
       const res = await dashboardApp.request('/events?sortBy=garbage');
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error).toHaveProperty('type', 'invalid_request_error');
+    });
+  });
+
+  it('GET /summary?startDate=invalid returns 400', async () => {
+    await withFreshDb(async () => {
+      const res = await dashboardApp.request('/summary?startDate=invalid');
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toHaveProperty('type', 'invalid_request_error');
+    });
+  });
+
+  it('GET /summary with future range returns empty aggregates', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { createdAt: new Date('2024-01-01T00:00:00Z'), totalTokens: 100 });
+
+      const res = await dashboardApp.request('/summary?startDate=2099-01-01T00:00:00Z');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.totalRequests).toBe(0);
+      expect(body.totalTokens).toBe(0);
     });
   });
 });

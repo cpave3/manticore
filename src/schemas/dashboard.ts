@@ -1,11 +1,20 @@
 import { z } from 'zod';
 
+export const summaryQuerySchema = z.object({
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+});
+
 export const breakdownQuerySchema = z.object({
   groupBy: z.enum(['client', 'model', 'upstream']),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
 });
 
 export const timeSeriesQuerySchema = z.object({
   bucket: z.enum(['hour', 'day']).default('hour'),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
 });
 
 export const eventLogQuerySchema = z.object({
@@ -13,4 +22,6 @@ export const eventLogQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(500).default(50),
   sortBy: z.enum(['createdAt', 'latencyMs', 'totalTokens', 'status']).optional(),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
 });

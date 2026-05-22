@@ -14,6 +14,7 @@ import ClientsAdmin from './components/ClientsAdmin';
 import UpstreamsAdmin from './components/UpstreamsAdmin';
 import ModelMappingsAdmin from './components/ModelMappingsAdmin';
 import RefreshControl from './components/RefreshControl';
+import DateRangePicker, { type DateRange } from './components/DateRangePicker';
 
 type Tab = 'overview' | 'events' | 'clients' | 'upstreams' | 'mappings';
 
@@ -21,6 +22,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange>(null);
 
   // Overview state
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -38,12 +40,13 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
+      const qs = dateRange ? { startDate: dateRange.start, endDate: dateRange.end } : undefined;
       const [s, bc, bm, bu, ts] = await Promise.all([
-        dashboardSummary(),
-        dashboardBreakdown('client'),
-        dashboardBreakdown('model'),
-        dashboardBreakdown('upstream'),
-        dashboardTimeSeries({ bucket: 'hour' }),
+        dashboardSummary(qs),
+        dashboardBreakdown('client', qs),
+        dashboardBreakdown('model', qs),
+        dashboardBreakdown('upstream', qs),
+        dashboardTimeSeries({ bucket: 'hour', ...qs }),
       ]);
       setSummary(s);
       setBreakdownClient(bc);
@@ -55,20 +58,21 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateRange]);
 
   const fetchEvents = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const r = await eventLog({ page: eventPage, pageSize: 20, sortBy: eventSort.by, sortDir: eventSort.dir });
+      const qs = dateRange ? { startDate: dateRange.start, endDate: dateRange.end } : undefined;
+      const r = await eventLog({ page: eventPage, pageSize: 20, sortBy: eventSort.by, sortDir: eventSort.dir, ...qs });
       setEvents(r);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [eventPage, eventSort]);
+  }, [eventPage, eventSort, dateRange]);
 
   const refresh = useCallback(() => {
     if (tab === 'overview') fetchOverview();
@@ -86,6 +90,9 @@ export default function App() {
       <header className="dashboard-header">
         <h1>Manticore Dashboard</h1>
         <div className="header-actions">
+          {tab !== 'clients' && tab !== 'upstreams' && tab !== 'mappings' && (
+            <DateRangePicker value={dateRange} onChange={setDateRange} />
+          )}
           {loading && (
             <span style={{ fontSize: 14, color: 'var(--text-muted)' }} className="animate-spin">
               ◌

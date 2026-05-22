@@ -364,6 +364,56 @@ tr:hover td {
   to { transform: rotate(360deg); }
 }
 
+.date-range-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.preset-btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: var(--radius);
+}
+
+.preset-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.preset-btn.active {
+  background: var(--accent);
+  color: #18140a;
+  border-color: var(--accent);
+}
+
+.custom-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-sep {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.range-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .dashboard-header {
