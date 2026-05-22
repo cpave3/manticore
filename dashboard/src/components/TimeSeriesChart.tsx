@@ -76,9 +76,9 @@ export default function TimeSeriesChart({ data }: { data: DashboardTimeSeriesPoi
                 yAxisId="left"
                 type="monotone"
                 dataKey="tokens"
-                stroke={chartColors.accent}
-                fill={chartColors.accent}
-                fillOpacity={0.15}
+                stroke={chartColors.neonPurple}
+                fill={chartColors.neonPurple}
+                fillOpacity={0.12}
                 strokeWidth={2}
                 dot={false}
                 animationDuration={300}
@@ -87,7 +87,7 @@ export default function TimeSeriesChart({ data }: { data: DashboardTimeSeriesPoi
                 yAxisId="right"
                 dataKey="requests"
                 fill={chartColors.accent}
-                opacity={0.4}
+                opacity={0.5}
                 barSize={6}
                 radius={[2, 2, 0, 0]}
                 animationDuration={300}
