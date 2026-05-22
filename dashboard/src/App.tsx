@@ -14,7 +14,7 @@ import ClientsAdmin from './components/ClientsAdmin';
 import UpstreamsAdmin from './components/UpstreamsAdmin';
 import ModelMappingsAdmin from './components/ModelMappingsAdmin';
 import RefreshControl from './components/RefreshControl';
-import DateRangePicker, { type DateRange } from './components/DateRangePicker';
+import DateRangePicker, { type DateRange, getPresetRange } from './components/DateRangePicker';
 
 type Tab = 'overview' | 'events' | 'clients' | 'upstreams' | 'mappings';
 
@@ -22,7 +22,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dateRange, setDateRange] = useState<DateRange>(null);
+  const [dateRange, setDateRange] = useState<DateRange>(getPresetRange('today'));
 
   // Overview state
   const [summary, setSummary] = useState<DashboardSummary | null>(null);

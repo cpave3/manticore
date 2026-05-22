@@ -21,7 +21,7 @@ function endOfDayUTC(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
 }
 
-function getPresetRange(key: PresetKey): DateRange {
+export function getPresetRange(key: PresetKey): DateRange {
   const now = new Date();
   switch (key) {
     case 'today':
@@ -65,11 +65,25 @@ export default function DateRangePicker({
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
-  // Sync preset when value changes externally (e.g. on initial load)
+  // Sync preset when value changes externally (e.g. initial load, parent reset)
   useEffect(() => {
-    if (value === null && preset !== 'all' && preset !== 'custom') {
-      setPreset('all');
+    if (value === null) {
+      if (preset !== 'all' && preset !== 'custom') {
+        setPreset('all');
+      }
+      return;
     }
+    for (const p of PRESETS) {
+      if (p.key === 'all' || p.key === 'custom') continue;
+      const range = getPresetRange(p.key);
+      if (range && range.start === value.start && range.end === value.end) {
+        if (preset !== p.key) setPreset(p.key);
+        return;
+      }
+    }
+    setPreset('custom');
+    setCustomStart(isoToDateInput(value.start));
+    setCustomEnd(isoToDateInput(value.end));
   }, [value]);
 
   const applyPreset = useCallback(
