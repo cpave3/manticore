@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { ZodError } from 'zod';
 import {
   summaryQuerySchema,
   breakdownQuerySchema,
@@ -14,8 +15,8 @@ function toDateRange(data: { startDate?: string; endDate?: string }) {
     : undefined;
 }
 
-function formatZodMessage(parsed: { success: false; error: { issues: { path: (string | number)[]; message: string }[] } }) {
-  return parsed.error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+function formatZodMessage(error: ZodError) {
+  return error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
 }
 
 const app = new Hono();
@@ -34,7 +35,7 @@ app.onError((err, c) => {
 app.get('/summary', async (c) => {
   const parsed = summaryQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json(buildApiError(formatZodMessage(parsed), 'invalid_request_error'), 400);
+    return c.json(buildApiError(formatZodMessage(parsed.error), 'invalid_request_error'), 400);
   }
   const result = await summary(toDateRange(parsed.data));
   return c.json(result);
@@ -43,7 +44,7 @@ app.get('/summary', async (c) => {
 app.get('/breakdown/:groupBy', async (c) => {
   const parsed = breakdownQuerySchema.safeParse({ groupBy: c.req.param('groupBy'), ...c.req.query() });
   if (!parsed.success) {
-    return c.json(buildApiError(formatZodMessage(parsed), 'invalid_request_error'), 400);
+    return c.json(buildApiError(formatZodMessage(parsed.error), 'invalid_request_error'), 400);
   }
   const result = await breakdown(parsed.data.groupBy, toDateRange(parsed.data));
   return c.json(result);
@@ -52,7 +53,7 @@ app.get('/breakdown/:groupBy', async (c) => {
 app.get('/time-series', async (c) => {
   const parsed = timeSeriesQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json(buildApiError(formatZodMessage(parsed), 'invalid_request_error'), 400);
+    return c.json(buildApiError(formatZodMessage(parsed.error), 'invalid_request_error'), 400);
   }
   const result = await timeSeries(parsed.data.bucket, toDateRange(parsed.data));
   return c.json(result);
@@ -61,7 +62,7 @@ app.get('/time-series', async (c) => {
 app.get('/events', async (c) => {
   const parsed = eventLogQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
-    return c.json(buildApiError(formatZodMessage(parsed), 'invalid_request_error'), 400);
+    return c.json(buildApiError(formatZodMessage(parsed.error), 'invalid_request_error'), 400);
   }
 
   const result = await eventLog({
