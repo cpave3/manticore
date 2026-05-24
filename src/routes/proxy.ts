@@ -321,55 +321,69 @@ async function handleStreamingResponse(c: any, ctx: StreamContext) {
     }
   }
 
-  const transform = new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      const text = decoder.decode(chunk, { stream: true });
-      // Normalise line endings so \r\n\r\n becomes \n\n
-      buffer += text.replace(/\r\n/g, '\n');
+  // Build the response stream manually so we can handle client aborts
+  // gracefully. `pipeTo` on a TransformStream can reject with `undefined`
+  // when the readable side is cancelled by the framework on disconnect,
+  // breaking the downstream agent. Pumping manually lets us catch that
+  // cleanly via the abort signal.
+  const responseStream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      if (!forwardResult.body) {
+        controller.close();
+        finalizeLog('error');
+        return;
+      }
 
-      while (true) {
-        const idx = buffer.indexOf('\n\n');
-        if (idx === -1) break;
-        const event = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        if (event.trim()) {
-          processEvent(event);
+      const reader = forwardResult.body.getReader();
+      let aborted = false;
+
+      const onAbort = () => {
+        aborted = true;
+        reader.cancel().catch(() => {});
+        finalizeLog('cancelled');
+      };
+      c.req.raw.signal.addEventListener('abort', onAbort, { once: true });
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = decoder.decode(value, { stream: true });
+          buffer += text.replace(/\r\n/g, '\n');
+
+          while (true) {
+            const idx = buffer.indexOf('\n\n');
+            if (idx === -1) break;
+            const event = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            if (event.trim()) {
+              processEvent(event);
+            }
+          }
+
+          controller.enqueue(value);
         }
-      }
 
-      controller.enqueue(chunk);
-    },
-    flush() {
-      if (buffer.trim()) {
-        processEvent(buffer);
+        if (buffer.trim()) {
+          processEvent(buffer);
+        }
+        controller.close();
+        finalizeLog('success');
+      } catch (e: unknown) {
+        if (!aborted) {
+          finalizeLog('error');
+        }
+        // Swallow the error here; if aborted the consumer is gone,
+        // if real the framework will handle it.
+      } finally {
+        c.req.raw.signal.removeEventListener('abort', onAbort);
+        reader.releaseLock();
       }
-      finalizeLog('success');
     },
   });
 
-  const abortHandler = () => {
-    finalizeLog('cancelled');
-  };
-  c.req.raw.signal.addEventListener('abort', abortHandler, { once: true });
-
-  if (forwardResult.body) {
-    forwardResult.body
-      .pipeTo(transform.writable)
-      .catch((e: unknown) => {
-        console.warn('[proxy] Stream pipe error:', e instanceof Error ? e.message : String(e));
-        finalizeLog('error');
-      })
-      .finally(() => {
-        c.req.raw.signal.removeEventListener('abort', abortHandler);
-      });
-  }
-
-  // If upstream has no body (shouldn't happen for streaming, but be safe)
-  if (!forwardResult.body) {
-    finalizeLog('error');
-  }
-
-  return c.newResponse(transform.readable, forwardResult.status, {
+  return c.newResponse(responseStream, forwardResult.status, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
