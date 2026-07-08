@@ -253,30 +253,30 @@ function convertPrompt(prompt: LanguageModelV3Prompt, warnings: SharedV3Warning[
     }
     if (message.role === 'assistant') {
       const content = partsToText(message.content.filter((part) => part.type !== 'tool-call'), warnings);
-      const toolCalls = message.content
-        .filter((part) => part.type === 'tool-call')
-        .map((part) => ({
-          id: part.toolCallId,
-          type: 'function' as const,
-          function: {
-            name: part.toolName,
-            arguments: JSON.stringify(part.input ?? {}),
-          },
-        }));
-      messages.push({
-        role: 'assistant',
-        content: content || null,
-        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-      });
+      if (content) {
+        messages.push({
+          role: 'assistant',
+          content,
+        });
+      }
+      for (const part of message.content) {
+        if (part.type !== 'tool-call') continue;
+        messages.push({
+          type: 'function_call',
+          call_id: part.toolCallId,
+          name: part.toolName,
+          arguments: JSON.stringify(part.input ?? {}),
+        });
+      }
       continue;
     }
     if (message.role === 'tool') {
       for (const part of message.content) {
         if (part.type !== 'tool-result') continue;
         messages.push({
-          role: 'tool',
-          tool_call_id: part.toolCallId,
-          content: toolOutputToText(part.output),
+          type: 'function_call_output',
+          call_id: part.toolCallId,
+          output: toolOutputToText(part.output),
         });
       }
     }
@@ -407,7 +407,7 @@ function streamCodexResponse(
           if (record.type === 'response.output_item.done' && record.item?.type === 'function_call') {
             controller.enqueue({
               type: 'tool-call',
-              toolCallId: String(record.item.id ?? record.item.call_id ?? randomUUID()),
+              toolCallId: String(record.item.call_id ?? record.item.id ?? randomUUID()),
               toolName: String(record.item.name ?? 'unknown'),
               input: String(record.item.arguments ?? '{}'),
             });

@@ -35,7 +35,8 @@ describe('ChatGPT Codex provider', () => {
 
   it('maps Codex SSE into AI SDK v6 generate result', async () => {
     const token = accessToken('acc_456');
-    const fetchMock = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('https://chatgpt.com/backend-api/codex/responses');
       const headers = init?.headers as Headers;
       expect(headers.get('Authorization')).toBe(`Bearer ${token}`);
       expect(headers.get('chatgpt-account-id')).toBe('acc_456');
@@ -80,5 +81,72 @@ describe('ChatGPT Codex provider', () => {
     expect(result.usage.inputTokens.total).toBe(7);
     expect(result.usage.inputTokens.cacheRead).toBe(2);
     expect(result.usage.outputTokens.total).toBe(3);
+  });
+
+  it('converts tool-call history into Responses function call items', async () => {
+    const token = accessToken('acc_456');
+    const fetchMock = vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const requestBody = JSON.parse(String(init?.body));
+      expect(requestBody.input).toEqual([
+        { role: 'user', content: 'list files' },
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'bash',
+          arguments: '{"command":"ls"}',
+        },
+        {
+          type: 'function_call_output',
+          call_id: 'call_1',
+          output: 'README.md',
+        },
+      ]);
+      expect(JSON.stringify(requestBody.input)).not.toContain('tool_calls');
+      return new Response(
+        sse([
+          { type: 'response.output_text.delta', delta: 'done' },
+          { type: 'response.completed', response: { status: 'completed' } },
+        ]),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const provider = createChatGPTCodexProvider({
+      getCredentials: async () => ({
+        accessToken: token,
+        refreshToken: 'refresh',
+        accountId: 'acc_456',
+        expiresAt: new Date(Date.now() + 3600_000),
+      }),
+    });
+
+    await provider.languageModel('gpt-5.5').doGenerate({
+      prompt: [
+        { role: 'user', content: [{ type: 'text', text: 'list files' }] },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'call_1',
+              toolName: 'bash',
+              input: { command: 'ls' },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'call_1',
+              toolName: 'bash',
+              output: { type: 'text', value: 'README.md' },
+            },
+          ],
+        },
+      ],
+    });
   });
 });

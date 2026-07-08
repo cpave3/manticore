@@ -27,19 +27,22 @@ export type ChatGPTCodexCredentials = {
   expiresAt: Date;
 };
 
-export type ChatGPTCodexMessage = {
-  role: 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_call_id?: string;
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: {
+export type ChatGPTCodexMessage =
+  | {
+      role: 'user' | 'assistant';
+      content: string | null;
+    }
+  | {
+      type: 'function_call';
+      call_id: string;
       name: string;
       arguments: string;
+    }
+  | {
+      type: 'function_call_output';
+      call_id: string;
+      output: string;
     };
-  }>;
-};
 
 export type ChatGPTCodexRequest = {
   model: string;

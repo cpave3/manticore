@@ -1,4 +1,4 @@
-import type { LanguageModelV3Prompt, LanguageModelV3StreamPart } from '@ai-sdk/provider';
+import type { LanguageModelV3CallOptions, LanguageModelV3Prompt, LanguageModelV3StreamPart } from '@ai-sdk/provider';
 import { randomUUID } from 'node:crypto';
 import { createChatGPTCodexProvider } from '../providers/chatgpt-codex/provider.js';
 import { getFreshChatGPTCodexCredentials } from './chatgpt-codex-auth.js';
@@ -18,6 +18,16 @@ type ChatMessage = {
   }>;
 };
 
+type ChatTool = {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters?: unknown;
+    strict?: boolean;
+  };
+};
+
 export async function forwardChatGPTCodex({
   modelPath,
   requestBody,
@@ -34,6 +44,7 @@ export async function forwardChatGPTCodex({
   });
   const model = provider.languageModel(modelPath);
   const prompt = openAIToLanguageModelPrompt(requestBody.messages as ChatMessage[]);
+  const tools = openAIToLanguageModelTools(requestBody.tools);
   const providerOptions = { 'chatgpt-codex': compactJsonObject({
     reasoningEffort: requestBody.reasoning_effort,
     reasoningSummary: requestBody.reasoning_summary,
@@ -44,12 +55,23 @@ export async function forwardChatGPTCodex({
   if (!isStream) {
     const result = await model.doGenerate({
       prompt,
+      tools,
       providerOptions,
     });
     const text = result.content
       .filter((part) => part.type === 'text')
       .map((part) => part.text)
       .join('');
+    const toolCalls = result.content
+      .filter((part) => part.type === 'tool-call')
+      .map((part) => ({
+        id: part.toolCallId,
+        type: 'function' as const,
+        function: {
+          name: part.toolName,
+          arguments: typeof part.input === 'string' ? part.input : JSON.stringify(part.input ?? {}),
+        },
+      }));
     const payload = {
       id: `chatcmpl-${randomUUID()}`,
       object: 'chat.completion',
@@ -58,8 +80,17 @@ export async function forwardChatGPTCodex({
       choices: [
         {
           index: 0,
-          message: { role: 'assistant', content: text },
-          finish_reason: result.finishReason.unified === 'length' ? 'length' : 'stop',
+          message: {
+            role: 'assistant',
+            content: text || null,
+            ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+          },
+          finish_reason:
+            toolCalls.length > 0
+              ? 'tool_calls'
+              : result.finishReason.unified === 'length'
+                ? 'length'
+                : 'stop',
         },
       ],
       usage: usageToOpenAI(result.usage),
@@ -69,6 +100,7 @@ export async function forwardChatGPTCodex({
 
   const streamResult = await model.doStream({
     prompt,
+    tools,
     providerOptions: {
       ...providerOptions,
       'chatgpt-codex': {
@@ -113,6 +145,13 @@ function jsonForwardResult(value: unknown, status: number): ForwardResult {
 }
 
 function openAIToLanguageModelPrompt(messages: ChatMessage[]): LanguageModelV3Prompt {
+  const toolNamesByCallId = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const toolCall of message.tool_calls ?? []) {
+      toolNamesByCallId.set(toolCall.id, toolCall.function.name);
+    }
+  }
   return messages.map((message) => {
     if (message.role === 'system') {
       return { role: 'system', content: stringifyContent(message.content) };
@@ -127,7 +166,7 @@ function openAIToLanguageModelPrompt(messages: ChatMessage[]): LanguageModelV3Pr
           {
             type: 'tool-result',
             toolCallId: message.tool_call_id ?? randomUUID(),
-            toolName: 'tool',
+            toolName: toolNamesByCallId.get(message.tool_call_id ?? '') ?? 'tool',
             output: { type: 'text', value: stringifyContent(message.content) },
           },
         ],
@@ -146,6 +185,23 @@ function openAIToLanguageModelPrompt(messages: ChatMessage[]): LanguageModelV3Pr
       ],
     };
   });
+}
+
+function openAIToLanguageModelTools(tools: unknown): LanguageModelV3CallOptions['tools'] {
+  if (!Array.isArray(tools)) return undefined;
+  return tools
+    .filter((tool): tool is ChatTool => {
+      if (!tool || typeof tool !== 'object') return false;
+      const candidate = tool as Partial<ChatTool>;
+      return candidate.type === 'function' && typeof candidate.function?.name === 'string';
+    })
+    .map((tool) => ({
+      type: 'function' as const,
+      name: tool.function.name,
+      description: tool.function.description,
+      inputSchema: tool.function.parameters,
+      ...(typeof tool.function.strict === 'boolean' ? { strict: tool.function.strict } : {}),
+    }));
 }
 
 function stringifyContent(content: unknown): string {
@@ -192,6 +248,7 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
       const id = `chatcmpl-${randomUUID()}`;
       const created = Math.floor(Date.now() / 1000);
       const reader = stream.getReader();
+      let emittedToolCall = false;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -209,6 +266,41 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
               ),
             );
           }
+          if (value.type === 'tool-call') {
+            emittedToolCall = true;
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  id,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model: modelPath,
+                  choices: [
+                    {
+                      index: 0,
+                      delta: {
+                        tool_calls: [
+                          {
+                            index: 0,
+                            id: value.toolCallId,
+                            type: 'function',
+                            function: {
+                              name: value.toolName,
+                              arguments:
+                                typeof value.input === 'string'
+                                  ? value.input
+                                  : JSON.stringify(value.input ?? {}),
+                            },
+                          },
+                        ],
+                      },
+                      finish_reason: null,
+                    },
+                  ],
+                })}\n\n`,
+              ),
+            );
+          }
           if (value.type === 'finish') {
             controller.enqueue(
               encoder.encode(
@@ -221,7 +313,12 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
                     {
                       index: 0,
                       delta: {},
-                      finish_reason: value.finishReason.unified === 'length' ? 'length' : 'stop',
+                      finish_reason:
+                        emittedToolCall
+                          ? 'tool_calls'
+                          : value.finishReason.unified === 'length'
+                            ? 'length'
+                            : 'stop',
                     },
                   ],
                   usage: usageToOpenAI(value.usage),
