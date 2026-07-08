@@ -29,6 +29,13 @@
       "when": 1757171200001,
       "tag": "0003_add_session_id",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1783482000000,
+      "tag": "0004_chatgpt_codex",
+      "breakpoints": true
     }
   ]
 }

@@ -53,7 +53,8 @@ export function listUpstreams() {
 
 export function createUpstream(body: {
   name: string;
-  baseUrl: string;
+  type?: 'openai-compatible' | 'chatgpt-codex';
+  baseUrl?: string;
   apiKey?: string;
   headers?: Record<string, string>;
 }) {

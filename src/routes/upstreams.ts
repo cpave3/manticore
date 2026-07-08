@@ -38,6 +38,7 @@ app.post('/', async (c) => {
   }
   const upstream = createUpstream({
     name: parsed.data.name,
+    type: parsed.data.type,
     baseUrl: parsed.data.baseUrl,
     apiKey: parsed.data.apiKey,
     headers: parsed.data.headers,

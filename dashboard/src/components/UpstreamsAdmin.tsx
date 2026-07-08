@@ -5,6 +5,7 @@ import { listUpstreams, createUpstream, updateUpstream, deleteUpstream } from '.
 export default function UpstreamsAdmin() {
   const [upstreams, setUpstreams] = useState<UpstreamResponse[]>([]);
   const [name, setName] = useState('');
+  const [type, setType] = useState<'openai-compatible' | 'chatgpt-codex'>('openai-compatible');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [headersStr, setHeadersStr] = useState('');
@@ -32,7 +33,7 @@ export default function UpstreamsAdmin() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !baseUrl.trim()) return;
+    if (!name.trim() || (type === 'openai-compatible' && !baseUrl.trim())) return;
 
     let headers: Record<string, string> | undefined;
     if (headersStr.trim()) {
@@ -49,11 +50,13 @@ export default function UpstreamsAdmin() {
     try {
       await createUpstream({
         name: name.trim(),
-        baseUrl: baseUrl.trim(),
+        type,
+        baseUrl: type === 'openai-compatible' ? baseUrl.trim() : undefined,
         apiKey: apiKey.trim() || undefined,
         headers,
       });
       setName('');
+      setType('openai-compatible');
       setBaseUrl('');
       setApiKey('');
       setHeadersStr('');
@@ -111,16 +114,23 @@ export default function UpstreamsAdmin() {
         <form onSubmit={handleCreate}>
           <div className="form-group">
             <label>Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ollama" required />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. codex" required />
           </div>
           <div className="form-group">
+            <label>Type</label>
+            <select value={type} onChange={(e) => setType(e.target.value as typeof type)}>
+              <option value="openai-compatible">OpenAI-compatible</option>
+              <option value="chatgpt-codex">ChatGPT Codex</option>
+            </select>
+          </div>
+          {type === 'openai-compatible' && <div className="form-group">
             <label>Base URL</label>
             <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:11434" required />
-          </div>
-          <div className="form-group">
+          </div>}
+          {type === 'openai-compatible' && <div className="form-group">
             <label>API Key (optional)</label>
             <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…" type="password" />
-          </div>
+          </div>}
           <div className="form-group">
             <label>Headers JSON (optional)</label>
             <textarea
@@ -148,6 +158,7 @@ export default function UpstreamsAdmin() {
           <thead>
             <tr>
               <th>Name</th>
+              <th>Type</th>
               <th>Base URL</th>
               <th>Key</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
@@ -156,7 +167,7 @@ export default function UpstreamsAdmin() {
           <tbody>
             {upstreams.length === 0 ? (
               <tr>
-                <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                   {loading ? 'Loading…' : 'No upstreams'}
                 </td>
               </tr>
@@ -179,7 +190,8 @@ export default function UpstreamsAdmin() {
                       u.name
                     )}
                   </td>
-                  <td>{u.baseUrl}</td>
+                  <td>{u.type}</td>
+                  <td>{u.baseUrl ?? '—'}</td>
                   <td>{u.apiKeyMasked ?? '—'}</td>
                   <td style={{ textAlign: 'right' }}>
                     {editingId === u.id ? (

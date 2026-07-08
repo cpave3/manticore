@@ -6,9 +6,12 @@ import { HttpError } from '../lib/errors.js';
 import { maskApiKey } from '../lib/api-key.js';
 import type { UpstreamResponse } from '../types/api.js';
 
+const CHATGPT_CODEX_BASE_URL_SENTINEL = 'chatgpt-codex://local';
+
 export type CreateUpstreamInput = {
   name: string;
-  baseUrl: string;
+  type?: 'openai-compatible' | 'chatgpt-codex';
+  baseUrl: string | null | undefined;
   apiKey: string | null | undefined;
   headers: Record<string, string> | null | undefined;
 };
@@ -20,8 +23,9 @@ export function createUpstream(input: CreateUpstreamInput): UpstreamResponse {
   const insert: UpstreamInsert = {
     id: randomUUID(),
     name: input.name,
-    baseUrl: input.baseUrl,
-    apiKey: input.apiKey ?? null,
+    type: input.type ?? 'openai-compatible',
+    baseUrl: input.type === 'chatgpt-codex' ? CHATGPT_CODEX_BASE_URL_SENTINEL : input.baseUrl ?? '',
+    apiKey: input.type === 'chatgpt-codex' ? null : input.apiKey ?? null,
     headers: input.headers ? JSON.stringify(input.headers) : null,
     createdAt: now,
   };
@@ -118,7 +122,8 @@ function toUpstreamResponse(row: UpstreamSelect | UpstreamInsert): UpstreamRespo
   return {
     id: row.id,
     name: row.name,
-    baseUrl: row.baseUrl,
+    type: row.type ?? 'openai-compatible',
+    baseUrl: row.type === 'chatgpt-codex' ? null : row.baseUrl,
     apiKeyMasked: row.apiKey ? maskApiKey(row.apiKey) : null,
     headers: row.headers ? (JSON.parse(row.headers) as Record<string, string>) : null,
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),

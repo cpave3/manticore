@@ -72,6 +72,24 @@ describe('upstreams routes', () => {
     });
   });
 
+  it('POST / chatgpt-codex does not require baseUrl', async () => {
+    await withFreshDb(async () => {
+      const res = await upstreamsApp.request('/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'codex', type: 'chatgpt-codex' }),
+      });
+      expect(res.status).toBe(201);
+      const body = await res.json();
+      expect(body).toMatchObject({
+        name: 'codex',
+        type: 'chatgpt-codex',
+        baseUrl: null,
+        apiKeyMasked: null,
+      });
+    });
+  });
+
   it('GET / returns array', async () => {
     await withFreshDb(async () => {
       await upstreamsApp.request('/', {

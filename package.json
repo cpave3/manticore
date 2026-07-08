@@ -20,6 +20,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@ai-sdk/provider": "^3.0.10",
     "@hono/node-server": "^2.0.2",
     "@hono/zod-validator": "^0.8.0",
     "@huggingface/transformers": "^4.2.0",

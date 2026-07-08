@@ -6,6 +6,12 @@ import { getDb } from './db/client.js';
 import { createClient, listClients, deleteClient, updateClientName } from './services/clients.js';
 import { createUpstream, listUpstreams, deleteUpstream, updateUpstreamName, findUpstreamByName } from './services/upstreams.js';
 import { createMapping, listMappings, deleteMapping, updateMapping } from './services/model-mappings.js';
+import {
+  getChatGPTCodexStatus,
+  loginChatGPTCodexBrowser,
+  loginChatGPTCodexDeviceCode,
+  logoutChatGPTCodex,
+} from './services/chatgpt-codex-auth.js';
 
 const args = process.argv.slice(2);
 
@@ -20,6 +26,8 @@ Commands:
 
   upstreams create <name> <baseUrl> [--api-key <key>] [--header k=v ...]
                                             Register an upstream
+  upstreams create <name> --type chatgpt-codex
+                                            Register a ChatGPT Codex upstream
   upstreams list                            List all upstreams
   upstreams delete <id>                     Delete an upstream
   upstreams edit <id> <newName>             Rename an upstream
@@ -33,6 +41,10 @@ Commands:
                                             Update a model mapping
 
   migrate                                   Run database migrations
+
+  codex login [--device-code]               Authenticate ChatGPT Codex
+  codex status                              Show ChatGPT Codex auth status
+  codex logout                              Delete stored ChatGPT Codex credentials
 
 Options:
   --help                                    Show this help message
@@ -136,16 +148,17 @@ async function run() {
     const sub = args[1];
     if (sub === 'create') {
       const name = args[2];
-      const baseUrl = args[3];
-      if (!name || !baseUrl) {
-        console.error('Error: name and baseUrl are required');
+      let baseUrl = args[3];
+      if (!name) {
+        console.error('Error: name is required');
         process.exit(1);
       }
 
       let apiKey: string | undefined;
       const headers: Record<string, string> = {};
+      let type: 'openai-compatible' | 'chatgpt-codex' = 'openai-compatible';
 
-      for (let i = 4; i < args.length; i++) {
+      for (let i = 3; i < args.length; i++) {
         if (args[i] === '--api-key' && i + 1 < args.length) {
           apiKey = args[++i];
         } else if (args[i] === '--header' && i + 1 < args.length) {
@@ -153,13 +166,28 @@ async function run() {
           if (k && vs.length > 0) {
             headers[k] = vs.join('=');
           }
+        } else if (args[i] === '--type' && i + 1 < args.length) {
+          const rawType = args[++i];
+          if (rawType !== 'openai-compatible' && rawType !== 'chatgpt-codex') {
+            console.error('Error: type must be openai-compatible or chatgpt-codex');
+            process.exit(1);
+          }
+          type = rawType;
+        } else if (!args[i].startsWith('--')) {
+          baseUrl = args[i];
         }
+      }
+
+      if (type === 'openai-compatible' && !baseUrl) {
+        console.error('Error: baseUrl is required for openai-compatible upstreams');
+        process.exit(1);
       }
 
       loadConfig();
       getDb();
       const upstream = createUpstream({
         name,
+        type,
         baseUrl,
         apiKey: apiKey ?? null,
         headers: Object.keys(headers).length > 0 ? headers : null,
@@ -167,7 +195,8 @@ async function run() {
       console.log('Created upstream:');
       console.log(`  id    : ${upstream.id}`);
       console.log(`  name  : ${upstream.name}`);
-      console.log(`  baseUrl: ${upstream.baseUrl}`);
+      console.log(`  type  : ${upstream.type}`);
+      console.log(`  baseUrl: ${upstream.baseUrl ?? '-'}`);
       console.log(`  apiKey: ${upstream.apiKeyMasked ?? '-'}`);
       console.log(`  headers: ${upstream.headers ? JSON.stringify(upstream.headers) : '-'}`);
       return;
@@ -185,7 +214,8 @@ async function run() {
         rows.map((r) => ({
           id: r.id,
           name: r.name,
-          baseUrl: r.baseUrl,
+          type: r.type,
+          baseUrl: r.baseUrl ?? '-',
           apiKey: r.apiKeyMasked ?? '-',
         }))
       );
@@ -222,6 +252,57 @@ async function run() {
     }
 
     console.error(`Unknown upstreams subcommand: ${sub ?? '(none)'}`);
+    process.exit(1);
+  }
+
+  if (command === 'codex') {
+    const sub = args[1];
+    if (sub === 'status') {
+      loadConfig();
+      getDb();
+      const status = getChatGPTCodexStatus();
+      console.log(status.authenticated ? 'ChatGPT Codex authenticated.' : 'ChatGPT Codex not authenticated.');
+      if (status.accountId) console.log(`  accountId: ${status.accountId}`);
+      if (status.expiresAt) console.log(`  expiresAt: ${status.expiresAt}`);
+      return;
+    }
+
+    if (sub === 'logout') {
+      loadConfig();
+      getDb();
+      logoutChatGPTCodex();
+      console.log('ChatGPT Codex credentials deleted.');
+      return;
+    }
+
+    if (sub === 'login') {
+      loadConfig();
+      getDb();
+      const useDeviceCode = args.includes('--device-code');
+      if (useDeviceCode) {
+        const credentials = await loginChatGPTCodexDeviceCode((info) => {
+          console.log('Open this URL and enter the code:');
+          console.log(`  ${info.verificationUri}`);
+          console.log(`  code: ${info.userCode}`);
+        });
+        console.log('ChatGPT Codex authenticated.');
+        console.log(`  accountId: ${credentials.accountId}`);
+        console.log(`  expiresAt: ${credentials.expiresAt.toISOString()}`);
+        return;
+      }
+
+      const credentials = await loginChatGPTCodexBrowser((url) => {
+        console.log('Open this URL in your browser to authenticate ChatGPT Codex:');
+        console.log(url);
+        console.log('Waiting for localhost callback on http://localhost:1455/auth/callback ...');
+      });
+      console.log('ChatGPT Codex authenticated.');
+      console.log(`  accountId: ${credentials.accountId}`);
+      console.log(`  expiresAt: ${credentials.expiresAt.toISOString()}`);
+      return;
+    }
+
+    console.error(`Unknown codex subcommand: ${sub ?? '(none)'}`);
     process.exit(1);
   }
 

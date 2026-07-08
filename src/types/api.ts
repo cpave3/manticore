@@ -16,7 +16,8 @@ export type ClientCreateResponse = ClientResponse & {
 export type UpstreamResponse = {
   id: string;
   name: string;
-  baseUrl: string;
+  type: 'openai-compatible' | 'chatgpt-codex';
+  baseUrl: string | null;
   apiKeyMasked: string | null;
   headers: Record<string, string> | null;
   createdAt: string;

@@ -5,6 +5,7 @@ import { findUpstreamByName, findUpstreamById, type RawUpstream } from '../servi
 import { parseModelId } from '../services/model-id.js';
 import { resolveModelMapping } from '../services/model-mappings.js';
 import { forward, type ForwardResult } from '../services/proxy.js';
+import { forwardChatGPTCodex } from '../services/chatgpt-codex-proxy.js';
 import { buildLogRecord, writeLogRecord } from '../services/logging.js';
 import {
   countPromptTokens,
@@ -144,12 +145,20 @@ app.post('/chat/completions', async (c) => {
 
   let forwardResult: ForwardResult;
   try {
-    forwardResult = await forward({
-      upstream,
-      modelPath,
-      requestBody: body,
-      isStream,
-    });
+    forwardResult =
+      upstream.type === 'chatgpt-codex'
+        ? await forwardChatGPTCodex({
+            modelPath,
+            requestBody: body,
+            isStream,
+            sessionId: c.var.sessionId,
+          })
+        : await forward({
+            upstream,
+            modelPath,
+            requestBody: body,
+            isStream,
+          });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     writeLogRecord(

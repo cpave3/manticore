@@ -14,6 +14,7 @@ export type ClientInsert = typeof clients.$inferInsert;
 export const upstreams = sqliteTable('upstreams', {
   id: text('id').primaryKey(),
   name: text('name').notNull().unique(),
+  type: text('type', { enum: ['openai-compatible', 'chatgpt-codex'] }).notNull().default('openai-compatible'),
   baseUrl: text('base_url').notNull(),
   apiKey: text('api_key'),
   headers: text('headers'),
@@ -59,8 +60,19 @@ export const logRecords = sqliteTable('log_records', {
   index('log_records_created_at_idx').on(table.createdAt),
 ]);
 
+export const providerCredentials = sqliteTable('provider_credentials', {
+  providerId: text('provider_id').primaryKey(),
+  accessToken: text('access_token').notNull(),
+  refreshToken: text('refresh_token').notNull(),
+  accountId: text('account_id').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
 export type LogRecordSelect = typeof logRecords.$inferSelect;
 export type LogRecordInsert = typeof logRecords.$inferInsert;
+export type ProviderCredentialSelect = typeof providerCredentials.$inferSelect;
+export type ProviderCredentialInsert = typeof providerCredentials.$inferInsert;
 
 export type ModelMappingSelect = typeof modelMappings.$inferSelect;
 export type ModelMappingInsert = typeof modelMappings.$inferInsert;

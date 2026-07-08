@@ -17,6 +17,9 @@ export async function forward({
   requestBody: Record<string, unknown>;
   isStream: boolean;
 }): Promise<ForwardResult> {
+  if (!upstream.baseUrl) {
+    throw new Error(`Upstream '${upstream.name}' does not have an OpenAI-compatible base URL`);
+  }
   const base = upstream.baseUrl.replace(/\/$/, '');
   const url = `${base}/chat/completions`;
 
