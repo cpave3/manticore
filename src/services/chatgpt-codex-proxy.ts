@@ -249,6 +249,7 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
       const created = Math.floor(Date.now() / 1000);
       const reader = stream.getReader();
       let emittedToolCall = false;
+      let toolCallIndex = 0;
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -268,6 +269,7 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
           }
           if (value.type === 'tool-call') {
             emittedToolCall = true;
+            const currentIndex = toolCallIndex++;
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({
@@ -281,7 +283,7 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
                       delta: {
                         tool_calls: [
                           {
-                            index: 0,
+                            index: currentIndex,
                             id: value.toolCallId,
                             type: 'function',
                             function: {
