@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Manticore</Name>
+  <Repository>cpave3/manticore:0.1.0</Repository>
+  <Registry>https://hub.docker.com/r/cpave3/manticore</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/cpave3/manticore</Support>
+  <Project>https://github.com/cpave3/manticore</Project>
+  <Overview>Self-hosted OpenAI-compatible proxy with usage tracking and a dashboard.</Overview>
+  <Category>Network:Other Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:3456]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/cpave3/manticore/main/unraid/manticore.xml</TemplateURL>
+  <Icon/>
+  <ExtraParams>--restart unless-stopped --env-file=/mnt/user/appdata/manticore/manticore.env</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+
+  <Config
+    Name="Web UI and API"
+    Target="3456"
+    Default="3456"
+    Mode="tcp"
+    Description="Manticore dashboard and OpenAI-compatible API port"
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">3456</Config>
+
+  <Config
+    Name="Application Data"
+    Target="/data"
+    Default="/mnt/user/appdata/manticore"
+    Mode="rw"
+    Description="Persistent SQLite database storage"
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/manticore</Config>
+</Container>
