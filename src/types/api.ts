@@ -50,6 +50,8 @@ export type DashboardSummary = {
   totalCompletionTokens: number;
   totalTokens: number;
   tokensPerSecond: number | null;
+  errorCount: number;
+  avgLatencyMs: number;
 };
 
 export type DashboardBreakdownRow = {

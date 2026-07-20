@@ -70,6 +70,8 @@ app.get('/events', async (c) => {
     pageSize: parsed.data.pageSize,
     sortBy: parsed.data.sortBy,
     sortDir: parsed.data.sortDir,
+    clientId: parsed.data.clientId,
+    status: parsed.data.status,
     ...toDateRange(parsed.data),
   });
   return c.json(result);

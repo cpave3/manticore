@@ -143,6 +143,31 @@ describe('aggregations service', () => {
         dbCtx.cleanup();
       }
     });
+
+    it('returns errorCount and avgLatencyMs', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await summary();
+        // seedData has 1 error out of 6 total
+        expect(result.errorCount).toBe(1);
+        // total latency = 100+200+50+300+400+500 = 1550, 6 requests
+        expect(result.avgLatencyMs).toBeCloseTo(1550 / 6, 1);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('returns zero errorCount and zero avgLatencyMs when no records', async () => {
+      const dbCtx = freshDb();
+      try {
+        const result = await summary();
+        expect(result.errorCount).toBe(0);
+        expect(result.avgLatencyMs).toBe(0);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
   });
 
   describe('breakdown by client', () => {
@@ -311,6 +336,91 @@ describe('aggregations service', () => {
         dbCtx.cleanup();
       }
     });
+
+    it('sorts by clientName ascending when requested', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({
+          page: 1,
+          pageSize: 50,
+          sortBy: 'clientName',
+          sortDir: 'asc',
+        });
+        expect(result.items.length).toBe(6);
+        for (let i = 1; i < result.items.length; i++) {
+          expect(result.items[i].clientName >= result.items[i - 1].clientName).toBe(true);
+        }
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('sorts by modelId ascending when requested', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({
+          page: 1,
+          pageSize: 50,
+          sortBy: 'modelId',
+          sortDir: 'asc',
+        });
+        expect(result.items.length).toBe(6);
+        for (let i = 1; i < result.items.length; i++) {
+          expect(result.items[i].modelId >= result.items[i - 1].modelId).toBe(true);
+        }
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('sorts by promptTokens descending when requested', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({
+          page: 1,
+          pageSize: 50,
+          sortBy: 'promptTokens',
+          sortDir: 'desc',
+        });
+        expect(result.items.length).toBe(6);
+        for (let i = 1; i < result.items.length; i++) {
+          // null sorts last in desc order in SQLite
+          const prev = result.items[i - 1].promptTokens;
+          const curr = result.items[i].promptTokens;
+          if (prev != null && curr != null) {
+            expect(curr).toBeLessThanOrEqual(prev);
+          }
+        }
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('sorts by completionTokens ascending when requested', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({
+          page: 1,
+          pageSize: 50,
+          sortBy: 'completionTokens',
+          sortDir: 'asc',
+        });
+        expect(result.items.length).toBe(6);
+        for (let i = 1; i < result.items.length; i++) {
+          const prev = result.items[i - 1].completionTokens;
+          const curr = result.items[i].completionTokens;
+          if (prev != null && curr != null) {
+            expect(curr).toBeGreaterThanOrEqual(prev);
+          }
+        }
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
   });
 
   describe('breakdown by session', () => {
@@ -453,6 +563,64 @@ describe('aggregations service', () => {
         const result = await eventLog({ page: 1, pageSize: 50, sortDir: 'desc' });
         expect(result.items.length).toBe(1);
         expect(result.items[0].sessionId).toBe('thread-42');
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+  });
+
+  describe('eventLog filtering', () => {
+    it('filters by clientId', async () => {
+      const dbCtx = freshDb();
+      try {
+        const { clientA, clientB } = await seedData(dbCtx.db);
+        const result = await eventLog({ page: 1, pageSize: 50, sortDir: 'desc', clientId: clientA.id });
+        expect(result.total).toBe(4);
+        expect(result.items.every((r) => r.clientId === clientA.id)).toBe(true);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('filters by status=error', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({ page: 1, pageSize: 50, sortDir: 'desc', status: 'error' });
+        expect(result.total).toBe(1);
+        expect(result.items.every((r) => r.status === 'error')).toBe(true);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('filters by status=success', async () => {
+      const dbCtx = freshDb();
+      try {
+        await seedData(dbCtx.db);
+        const result = await eventLog({ page: 1, pageSize: 50, sortDir: 'desc', status: 'success' });
+        expect(result.total).toBe(5);
+        expect(result.items.every((r) => r.status === 'success')).toBe(true);
+      } finally {
+        dbCtx.cleanup();
+      }
+    });
+
+    it('combines clientId and status filters', async () => {
+      const dbCtx = freshDb();
+      try {
+        const { clientA, clientB } = await seedData(dbCtx.db);
+        // clientA has 4 success, 0 error; clientB has 1 success, 1 error
+        const result = await eventLog({
+          page: 1,
+          pageSize: 50,
+          sortDir: 'desc',
+          clientId: clientB.id,
+          status: 'error',
+        });
+        expect(result.total).toBe(1);
+        expect(result.items[0].clientId).toBe(clientB.id);
+        expect(result.items[0].status).toBe('error');
       } finally {
         dbCtx.cleanup();
       }

@@ -27,6 +27,7 @@ export async function summary(range?: { start?: Date; end?: Date }): Promise<Das
       totalCompletionTokens: sql<number>`COALESCE(SUM(${logRecords.completionTokens}), 0)`,
       totalTokens: sql<number>`COALESCE(SUM(${logRecords.totalTokens}), 0)`,
       totalLatencyMs: sql<number>`COALESCE(SUM(${logRecords.latencyMs}), 0)`,
+      errorCount: sql<number>`COALESCE(SUM(CASE WHEN ${logRecords.status} = 'error' THEN 1 ELSE 0 END), 0)`,
     })
     .from(logRecords)
     .where(where)
@@ -34,13 +35,16 @@ export async function summary(range?: { start?: Date; end?: Date }): Promise<Das
 
   const totalCompletionTokens = Number(row?.totalCompletionTokens ?? 0);
   const totalLatencyMs = Number(row?.totalLatencyMs ?? 0);
+  const totalRequests = Number(row?.totalRequests ?? 0);
 
   return {
-    totalRequests: Number(row?.totalRequests ?? 0),
+    totalRequests,
     totalPromptTokens: Number(row?.totalPromptTokens ?? 0),
     totalCompletionTokens,
     totalTokens: Number(row?.totalTokens ?? 0),
     tokensPerSecond: tokensPerSecond(totalCompletionTokens, totalLatencyMs),
+    errorCount: Number(row?.errorCount ?? 0),
+    avgLatencyMs: totalRequests > 0 ? totalLatencyMs / totalRequests : 0,
   };
 }
 
@@ -216,8 +220,14 @@ export async function timeSeries(
 
 const sortableColumns = {
   createdAt: logRecords.createdAt,
-  latencyMs: logRecords.latencyMs,
+  clientName: logRecords.clientName,
+  sessionId: logRecords.sessionId,
+  modelId: logRecords.modelId,
+  upstreamName: logRecords.upstreamName,
+  promptTokens: logRecords.promptTokens,
+  completionTokens: logRecords.completionTokens,
   totalTokens: logRecords.totalTokens,
+  latencyMs: logRecords.latencyMs,
   status: logRecords.status,
 } as const;
 
@@ -228,10 +238,18 @@ export async function eventLog(params: {
   sortDir: 'asc' | 'desc';
   start?: Date;
   end?: Date;
+  clientId?: string;
+  status?: 'success' | 'error' | 'cancelled';
 }): Promise<EventLogResponse> {
   const db = getDb();
-  const { page, pageSize, sortBy, sortDir, start, end } = params;
-  const where = dateFilters(start, end);
+  const { page, pageSize, sortBy, sortDir, start, end, clientId, status } = params;
+
+  const filters = [];
+  if (start) filters.push(gte(logRecords.createdAt, start));
+  if (end) filters.push(lte(logRecords.createdAt, end));
+  if (clientId) filters.push(eq(logRecords.clientId, clientId));
+  if (status) filters.push(eq(logRecords.status, status));
+  const where = filters.length > 0 ? and(...filters) : undefined;
 
   const totalRow = await db.select({ count: count() }).from(logRecords).where(where).get();
   const total = Number(totalRow?.count ?? 0);

@@ -143,6 +143,8 @@ export function eventLog(params: {
   pageSize: number;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
+  clientId?: string;
+  status?: 'success' | 'error' | 'cancelled';
   startDate?: string;
   endDate?: string;
 }) {
@@ -151,6 +153,8 @@ export function eventLog(params: {
   qs.set('pageSize', String(params.pageSize));
   if (params.sortBy) qs.set('sortBy', params.sortBy);
   if (params.sortDir) qs.set('sortDir', params.sortDir);
+  if (params.clientId) qs.set('clientId', params.clientId);
+  if (params.status) qs.set('status', params.status);
   if (params.startDate) qs.set('startDate', params.startDate);
   if (params.endDate) qs.set('endDate', params.endDate);
   return fetchJson<EventLogResponse>(`/dashboard/events?${qs}`);

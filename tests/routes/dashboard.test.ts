@@ -191,6 +191,36 @@ describe('dashboard routes', () => {
     });
   });
 
+  it('GET /events?sortBy=clientName returns 200 (not 400)', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { clientName: 'Alice' });
+      await makeLogRecord(db, { clientName: 'Bob' });
+
+      const res = await dashboardApp.request('/events?sortBy=clientName&sortDir=asc');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.items.length).toBe(2);
+      expect(body.items[0].clientName).toBe('Alice');
+      expect(body.items[1].clientName).toBe('Bob');
+    });
+  });
+
+  it('GET /events?sortBy=promptTokens returns 200 (not 400)', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      await makeLogRecord(db, { promptTokens: 5 });
+      await makeLogRecord(db, { promptTokens: 100 });
+
+      const res = await dashboardApp.request('/events?sortBy=promptTokens&sortDir=desc');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.items.length).toBe(2);
+      expect(body.items[0].promptTokens).toBe(100);
+      expect(body.items[1].promptTokens).toBe(5);
+    });
+  });
+
   it('GET /summary?startDate=invalid returns 400', async () => {
     await withFreshDb(async () => {
       const res = await dashboardApp.request('/summary?startDate=invalid');

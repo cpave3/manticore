@@ -61,7 +61,7 @@ export default function DateRangePicker({
   value: DateRange;
   onChange: (range: DateRange) => void;
 }) {
-  const [preset, setPreset] = useState<PresetKey>('all');
+  const [preset, setPreset] = useState<PresetKey>('today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
