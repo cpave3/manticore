@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Manticore</Name>
-  <Repository>cpave3/manticore:0.1.0</Repository>
+  <Repository>cpave3/manticore:0.1.1</Repository>
   <Registry>https://hub.docker.com/r/cpave3/manticore</Registry>
   <Network>bridge</Network>
   <MyIP/>

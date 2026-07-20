@@ -37,12 +37,12 @@ Log in to Docker Hub from the desktop:
 docker login
 ```
 
-From the Manticore repository, build and publish a versioned image. Replace `0.1.0` with the release version being deployed:
+From the Manticore repository, build and publish a versioned image. Replace `0.1.1` with the release version being deployed:
 
 ```bash
 docker buildx build \
   --platform linux/amd64 \
-  --tag YOUR_DOCKERHUB_USER/manticore:0.1.0 \
+  --tag YOUR_DOCKERHUB_USER/manticore:0.1.1 \
   --tag YOUR_DOCKERHUB_USER/manticore:latest \
   --push \
   .
@@ -53,7 +53,7 @@ Most Unraid servers are `linux/amd64`. To publish for both x86-64 and ARM64 host
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  --tag YOUR_DOCKERHUB_USER/manticore:0.1.0 \
+  --tag YOUR_DOCKERHUB_USER/manticore:0.1.1 \
   --tag YOUR_DOCKERHUB_USER/manticore:latest \
   --push \
   .
@@ -173,7 +173,7 @@ Create `/boot/config/plugins/dockerMan/templates-user/my-manticore.xml` with the
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Manticore</Name>
-  <Repository>YOUR_DOCKERHUB_USER/manticore:0.1.0</Repository>
+  <Repository>YOUR_DOCKERHUB_USER/manticore:0.1.1</Repository>
   <Registry>https://hub.docker.com/r/YOUR_DOCKERHUB_USER/manticore</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -326,7 +326,7 @@ Before upgrading:
 
 1. Make and verify a database backup.
 2. Edit the Manticore container in Unraid.
-3. Change the repository from `YOUR_DOCKERHUB_USER/manticore:0.1.0` to `YOUR_DOCKERHUB_USER/manticore:0.2.0`.
+3. Change the repository from `YOUR_DOCKERHUB_USER/manticore:0.1.1` to `YOUR_DOCKERHUB_USER/manticore:0.2.0`.
 4. Select **Apply**.
 5. Check `docker logs --follow Manticore` for migration or startup failures.
 6. Verify the dashboard and one API request.
