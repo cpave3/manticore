@@ -14,7 +14,7 @@
   <WebUI>http://[IP]:[PORT:3456]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/cpave3/manticore/main/unraid/manticore.xml</TemplateURL>
   <Icon/>
-  <ExtraParams>--restart unless-stopped --env-file=/mnt/user/appdata/manticore/manticore.env</ExtraParams>
+  <ExtraParams>--restart on-failure:5 --env-file=/mnt/user/appdata/manticore/manticore.env</ExtraParams>
   <PostArgs/>
   <CPUset/>
 

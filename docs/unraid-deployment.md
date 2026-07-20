@@ -186,7 +186,7 @@ Create `/boot/config/plugins/dockerMan/templates-user/my-manticore.xml` with the
   <WebUI>http://[IP]:[PORT:3456]/</WebUI>
   <TemplateURL/>
   <Icon/>
-  <ExtraParams>--restart unless-stopped --env-file=/mnt/user/appdata/manticore/manticore.env</ExtraParams>
+  <ExtraParams>--restart on-failure:5 --env-file=/mnt/user/appdata/manticore/manticore.env</ExtraParams>
   <PostArgs/>
   <CPUset/>
 
@@ -214,7 +214,7 @@ Create `/boot/config/plugins/dockerMan/templates-user/my-manticore.xml` with the
 </Container>
 ```
 
-The `manticore.env` file is passed directly to the Docker daemon with `--env-file`; it does not need a container volume mapping. The `/data` mapping persists the database and its WAL files.
+The `manticore.env` file is passed directly to the Docker daemon with `--env-file`; it does not need a container volume mapping. The `/data` mapping persists the database and its WAL files. The `on-failure:5` restart policy retries transient failures but stops after five consecutive crashes, preventing an unbounded crash loop.
 
 ### Optional: download the template from GitHub
 
