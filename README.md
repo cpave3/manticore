@@ -238,9 +238,62 @@ docker run -p 3456:3456 -v $(pwd)/data:/data manticore
 ```
 
 The container:
+
 - mounts `/data` as a volume for the SQLite database,
 - binds to `0.0.0.0:3456`,
 - runs migrations automatically on startup.
+
+### Build, tag, and push a new image version
+
+Run these commands from the Manticore repository on your build machine. You need Docker with Buildx and permission to push to the Docker Hub repository. The checked-in Unraid template uses `cpave3/manticore`; change the image name if you publish under another account.
+
+Choose a new, unused version tag for each release. `0.1.2` below is an example, not an automatically selected version. The build uses the current working tree; an image tag does not update `package.json` or create a Git tag.
+
+```bash
+MANTICORE_IMAGE=cpave3/manticore
+MANTICORE_VERSION=0.1.2
+
+# Check that the working tree contains the changes you want to release.
+git status --short
+
+# Authenticate to Docker Hub with an account that can push this image.
+docker login
+
+# Build for an x86-64 Unraid server and load the versioned image locally.
+docker buildx build \
+  --platform linux/amd64 \
+  --tag "${MANTICORE_IMAGE}:${MANTICORE_VERSION}" \
+  --load \
+  .
+
+# Push the versioned image to Docker Hub.
+docker push "${MANTICORE_IMAGE}:${MANTICORE_VERSION}"
+
+# Check the published image manifest.
+docker buildx imagetools inspect "${MANTICORE_IMAGE}:${MANTICORE_VERSION}"
+```
+
+The Dockerfile installs dependencies and builds both the server and dashboard. You do not need to run `pnpm build` separately before building the image. Use a builder that supports `linux/amd64`; an ARM build machine needs cross-platform build support. See the [Unraid deployment guide](docs/unraid-deployment.md#1-publish-the-docker-image) for a multi-platform build-and-push command.
+
+If you also maintain a moving `latest` tag, publish it after verifying the versioned image. This replaces the registry's previous `latest` reference but leaves the versioned tag available:
+
+```bash
+docker tag "${MANTICORE_IMAGE}:${MANTICORE_VERSION}" "${MANTICORE_IMAGE}:latest"
+docker push "${MANTICORE_IMAGE}:latest"
+```
+
+Use the versioned tag in Unraid so publishing `latest` does not change the selected release. Docker documents the commands under [Buildx build](https://docs.docker.com/reference/cli/docker/buildx/build/), [image tag](https://docs.docker.com/reference/cli/docker/image/tag/), and [image push](https://docs.docker.com/reference/cli/docker/image/push/).
+
+### Deploy the new version on Unraid
+
+Publishing an image does not update a running container. After the push succeeds:
+
+1. Make and verify a [database backup](docs/unraid-deployment.md#8-back-up-manticore-on-unraid).
+2. Edit the Manticore container in Unraid and set **Repository** to the new tag, for example `cpave3/manticore:0.1.2`.
+3. Keep the existing `/data` mount, environment settings, and port mappings unchanged. Select **Apply** to deploy the new image; this replaces the running Manticore container.
+4. Check `docker logs --tail 100 Manticore` for startup or migration errors, using your actual container name if different.
+
+Included database migrations run automatically at startup; do not run `drizzle-kit` on Unraid. The model-generation-settings release adds no database migration. Keep the backup for later releases because rolling back an image does not roll back its database migrations. See the [full upgrade instructions](docs/unraid-deployment.md#9-upgrade-manticore) for verification and rollback considerations.
 
 ---
 
