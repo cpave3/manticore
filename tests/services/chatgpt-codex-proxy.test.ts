@@ -38,7 +38,53 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 describe('forwardChatGPTCodex', () => {
+  it.each([
+    { url: null },
+    { url: '' },
+    { url: 'data:text/plain;base64,aGVsbG8=' },
+    { url: 'data:image/png;base64,not base64' },
+    { url: 'data:image/svg+xml;base64,PHN2Zy8+' },
+    { url: 'file:///tmp/secret.png' },
+    { url: 'https://user:secret@example.com/image.png' },
+    { url: 'https://example.com/image.png', detail: 'invented' },
+    { url: 'https://example.com/image.png', detail: 'original', model: 'gpt-5-codex' },
+    { url: 'https://example.com/image.png', model: 'gpt-5.3-codex-spark' },
+  ])('rejects invalid image input before upstream access: %j', async ({ url, detail, model }) => {
+    const fetchMock = vi.fn(async () => new Response(sse([{ type: 'response.completed', response: { status: 'completed' } }])));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(forwardChatGPTCodex({ modelPath: model ?? 'gpt-5.6-sol', isStream: false,
+      requestBody: { messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url, detail } }] }] },
+    })).rejects.toMatchObject({ status: 400, code: 'invalid_image_input' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([false, true])('preserves mixed text and images in the Codex request (stream=%s)', async (isStream) => {
+    const fetchMock = vi.fn(async () => new Response(sse([
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])));
+    vi.stubGlobal('fetch', fetchMock);
+    const image = 'data:image/png;base64,iVBORw==';
+    const result = await forwardChatGPTCodex({ modelPath: 'gpt-5.6-sol', isStream, requestBody: {
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Compare these images' },
+        { type: 'image_url', image_url: { url: image, detail: 'high' } },
+        { type: 'text', text: 'with this one' },
+        { type: 'image_url', image_url: { url: 'https://example.com/photo.jpg' } },
+      ] }], reasoning_effort: 'max', parallel_tool_calls: false,
+    } });
+    expect(result.body).not.toBeNull();
+    await readStream(result.body!);
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body.input).toEqual([{ role: 'user', content: [
+      { type: 'input_text', text: 'Compare these images' },
+      { type: 'input_image', image_url: image, detail: 'high' },
+      { type: 'input_text', text: 'with this one' },
+      { type: 'input_image', image_url: 'https://example.com/photo.jpg' },
+    ] }]);
+    expect(body.reasoning.effort).toBe('max');
+    expect(body.parallel_tool_calls).toBe(false);
+  });
   it.each([false, true])('preserves reasoning summaries and opaque tool-continuation data (stream=%s)', async (isStream) => {
+    const imageMessage = { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw==' } }] };
     const reasoning = { type: 'reasoning', id: 'rs_1', encrypted_content: 'opaque-ciphertext', summary: [{ type: 'summary_text', text: 'A short summary' }] };
     const fetchMock = vi.fn(async () => new Response(sse([
       { type: 'response.output_item.done', item: reasoning },
@@ -46,7 +92,7 @@ describe('forwardChatGPTCodex', () => {
       { type: 'response.completed', response: { status: 'completed' } },
     ])));
     vi.stubGlobal('fetch', fetchMock);
-    const result = await forwardChatGPTCodex({ modelPath: 'gpt-5.6-sol', isStream, requestBody: { messages: [{ role: 'user', content: 'test' }] } });
+    const result = await forwardChatGPTCodex({ modelPath: 'gpt-5.6-sol', isStream, requestBody: { messages: [imageMessage] } });
     const output = await readStream(result.body);
     expect(output).toContain('reasoning_content');
     expect(output).toContain('A short summary');
@@ -55,10 +101,13 @@ describe('forwardChatGPTCodex', () => {
     fetchMock.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body));
       expect(request.input).toContainEqual(reasoning);
+      expect(request.input).toContainEqual({ role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,iVBORw==' }] });
+      expect(request.input).toContainEqual({ type: 'function_call_output', call_id: 'call_1', output: 'done' });
       expect(request.input.filter((item: { role?: string }) => item.role === 'assistant')).not.toContainEqual(expect.objectContaining({ content: expect.stringContaining('opaque-ciphertext') }));
       return new Response(sse([{ type: 'response.completed', response: { status: 'completed' } }]));
     });
     await forwardChatGPTCodex({ modelPath: 'gpt-5.6-sol', isStream: false, requestBody: { messages: [
+      imageMessage,
       { role: 'assistant', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'test', arguments: '{}' }, codex_reasoning: [reasoning] }] },
       { role: 'tool', tool_call_id: 'call_1', content: 'done' },
     ] } });

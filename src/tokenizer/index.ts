@@ -155,6 +155,10 @@ export async function countPromptTokens(
   messages: ChatMessage[],
   modelId: string
 ): Promise<number | null> {
+  // Text tokenizers cannot price images. Prefer upstream usage, not a base64 text estimate.
+  if (messages.some((message) => Array.isArray(message.content) && message.content.some((part) =>
+    part && typeof part === 'object' && ['image_url', 'image', 'input_image'].includes(part.type)
+  ))) return null;
   const { provider, modelPath } = parseModelId(modelId);
 
   if (usesGptTokenizer(provider, modelPath)) {

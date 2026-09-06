@@ -16,6 +16,16 @@ The Codex backend does not enforce Chat Completions output caps or accept sampli
 
 Reasoning summaries use `reasoning_content`. Opaque continuation items use the `codex_reasoning` extension and are returned on tool calls. Clients must retain that metadata on the matching assistant tool call. Manticore restores validated reasoning items before the next function call. Encrypted content never becomes assistant display text.
 
+## Image input
+
+Discovery includes optional `inputModalities` for verified resolved models. `['text', 'image']` enables vision, `['text']` declares text-only, and an absent field means unknown. Modalities are part of the fingerprint. Alias remapping updates the resolved profile; alias names do not imply support. Exact Codex metadata includes Sol, Terra, Luna, Astra, reserve, GPT-5.5, GPT-5.4 Mini, and auto-review as image-capable, with Spark text-only. Other Codex models remain unknown until verified.
+
+Codex Chat Completions accepts mixed user text and `image_url` parts. PNG, JPEG, WebP, and GIF data URIs retain their payloads. HTTP(S) URLs pass to the backend without a Manticore download; local paths and credential-bearing URLs are rejected. Direct SDK callers can also supply image bytes or base64 data. Both response modes produce structured `input_image` items without flattening or double-encoding, and preserve image history alongside opaque reasoning and tool calls.
+
+Optional detail values are `auto`, `low`, and `high`; `original` requires a verified supporting Codex profile. Omission uses the backend default. Malformed parts, invalid base64, unsupported media types/detail values, and known text-only models return HTTP 400 with `invalid_image_input` before generation. This adds image understanding, not image generation or document uploads. See OpenAI's [image input format](https://developers.openai.com/api/docs/guides/images-vision).
+
+Local prompt token estimates are unavailable for image-bearing requests; upstream usage remains authoritative. Image payloads are not sent to text tokenizers. Ordinary compatible forwarding preserves the original image parts.
+
 ## Compatible upstreams
 
 Ordinary forwarding retains generation fields while replacing the routed model and credentials. Known GLM and Kimi endpoints expose conservative profiles. GLM-5.3 and Kimi K2.7 Code require thinking; Kimi sampling values are fixed. Unknown servers need explicit Chimera declarations.

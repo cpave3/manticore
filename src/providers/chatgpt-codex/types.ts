@@ -32,7 +32,7 @@ export type ChatGPTCodexMessage =
   | { type: 'reasoning'; id: string; encrypted_content: string; summary: Array<{ type: 'summary_text'; text: string }> }
   | {
       role: 'user' | 'assistant';
-      content: string | null;
+      content: string | null | ChatGPTCodexInputPart[];
     }
   | {
       type: 'function_call';
@@ -45,6 +45,10 @@ export type ChatGPTCodexMessage =
       call_id: string;
       output: string;
     };
+
+export type ChatGPTCodexInputPart =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; image_url: string; detail?: 'auto' | 'low' | 'high' | 'original' };
 
 export type ChatGPTCodexRequest = {
   model: string;

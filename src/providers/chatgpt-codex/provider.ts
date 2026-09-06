@@ -12,10 +12,12 @@ import type {
   SharedV3Warning,
 } from '@ai-sdk/provider';
 import { randomUUID } from 'node:crypto';
+import { codexImageInput } from './images.js';
 import { describeModelCapabilities, validateCodexSettings } from '../../services/model-capabilities.js';
 import type {
   ChatGPTCodexCredentials,
   ChatGPTCodexMessage,
+  ChatGPTCodexInputPart,
   ChatGPTCodexProviderOptions,
   ChatGPTCodexRequest,
   ChatGPTCodexUsage,
@@ -150,7 +152,7 @@ export class ChatGPTCodexLanguageModel implements LanguageModelV3 {
       ...providerOptions, temperature: options.temperature, topP: options.topP,
     });
     const modelDefaults = MODEL_CONTEXT[this.modelId];
-    const input = convertPrompt(options.prompt, warnings);
+    const input = convertPrompt(options.prompt, warnings, this.modelId);
     const reasoningEffort =
       providerOptions.reasoningEffort ?? this.settings.reasoningEffort ?? defaultReasoningEffort(this.modelId);
     const reasoningSummary = providerOptions.reasoningSummary !== undefined
@@ -240,14 +242,14 @@ function extractInstructions(prompt: LanguageModelV3Prompt): string {
   return system || 'You are a helpful assistant.';
 }
 
-function convertPrompt(prompt: LanguageModelV3Prompt, warnings: SharedV3Warning[]): ChatGPTCodexMessage[] {
+function convertPrompt(prompt: LanguageModelV3Prompt, warnings: SharedV3Warning[], modelId: string): ChatGPTCodexMessage[] {
   const messages: ChatGPTCodexMessage[] = [];
   for (const message of prompt) {
     if (message.role === 'system') {
       continue;
     }
     if (message.role === 'user') {
-      messages.push({ role: 'user', content: partsToText(message.content, warnings) });
+      messages.push({ role: 'user', content: userParts(message.content, warnings, modelId) });
       continue;
     }
     if (message.role === 'assistant') {
@@ -293,6 +295,14 @@ function convertPrompt(prompt: LanguageModelV3Prompt, warnings: SharedV3Warning[
     }
   }
   return messages;
+}
+
+function userParts(parts: Extract<LanguageModelV3Prompt[number], { role: 'user' }>['content'], warnings: SharedV3Warning[], modelId: string): string | ChatGPTCodexInputPart[] {
+  if (!parts.some((part) => part.type === 'file')) return partsToText(parts, warnings);
+  return parts.map((part) => {
+    if (part.type === 'text') return { type: 'input_text', text: part.text };
+    return codexImageInput(modelId, part.data, part.mediaType, part.providerOptions?.['chatgpt-codex']?.imageDetail);
+  });
 }
 
 function partsToText(parts: Array<{ type: string }>, warnings: SharedV3Warning[]): string {

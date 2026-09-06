@@ -25,6 +25,19 @@ function sse(events: unknown[]): ReadableStream<Uint8Array> {
 }
 
 describe('ChatGPT Codex provider', () => {
+  it.each([new Uint8Array([137, 80, 78, 71]), 'iVBORw==', 'data:image/png;base64,iVBORw==', new URL('data:image/png;base64,iVBORw==')])('encodes SDK image input once: %s', async (data) => {
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body)).input).toEqual([{ role: 'user', content: [
+        { type: 'input_image', image_url: 'data:image/png;base64,iVBORw==', detail: 'original' },
+      ] }]);
+      return new Response(sse([{ type: 'response.completed', response: { status: 'completed' } }]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = createChatGPTCodexProvider({ getCredentials: async () => ({ accessToken: 'mock', refreshToken: 'mock', accountId: 'mock', expiresAt: new Date(Date.now() + 3600000) }) });
+    await provider.languageModel('gpt-5.6-sol').doGenerate({ prompt: [{ role: 'user', content: [
+      { type: 'file', mediaType: 'image/png', data, providerOptions: { 'chatgpt-codex': { imageDetail: 'original' } } },
+    ] }] });
+  });
   afterEach(() => {
     vi.unstubAllGlobals();
   });

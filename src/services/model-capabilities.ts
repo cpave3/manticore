@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { HttpError } from '../lib/errors.js';
+import { codexInputModalities } from '../providers/chatgpt-codex/images.js';
 
 export interface SettingCapability {
   status: 'supported' | 'unsupported' | 'unknown';
@@ -13,6 +14,7 @@ export interface SettingCapability {
 }
 
 export interface ModelCapabilities {
+  inputModalities?: Array<'text' | 'image'>;
   schemaVersion: 1;
   modelId: string;
   profile: string;
@@ -49,7 +51,9 @@ export function describeModelCapabilities(modelId: string, upstreamType: string,
   }])) as Record<string, SettingCapability>;
   let profile = 'unknown';
   let source = 'unknown';
+  let inputModalities: ModelCapabilities['inputModalities'];
   if (upstreamType === 'chatgpt-codex') {
+    inputModalities = codexInputModalities(modelId);
     profile = 'codex';
     source = 'codex-model-metadata-2026-09-06';
     for (const key of ['temperature', 'topP', 'maxOutputTokens', 'thinkingBudgetTokens']) {
@@ -71,6 +75,7 @@ export function describeModelCapabilities(modelId: string, upstreamType: string,
       && /(?:^|\/)(?:GLM-(?:4\.[567](?:-(?:flashx?|airx?|x))?|5(?:\.[123])?(?:-flash)?)|kimi-k2\.(?:[56]|7-code(?:-highspeed)?))$/i.test(modelId)) {
       profile = 'thinking';
       source = 'compatible-thinking-profile';
+      if (/(?:^|\/)kimi-k2\.[56]$/i.test(modelId)) inputModalities = ['text', 'image'];
       settings.thinking = choice(/(?:glm-5\.3|kimi-k2\.7-code)/i.test(modelId) ? ['on'] : ['on', 'off']);
       settings.maxOutputTokens = { status: 'supported', type: 'number', min: 1, integer: true };
       if (/(?:^|\/)glm-/i.test(modelId)) {
@@ -83,8 +88,8 @@ export function describeModelCapabilities(modelId: string, upstreamType: string,
       }
     }
   }
-  const fingerprint = createHash('sha256').update(JSON.stringify({ modelId, profile, settings })).digest('hex').slice(0, 16);
-  return { schemaVersion: 1, modelId, profile, source, fingerprint, settings };
+  const fingerprint = createHash('sha256').update(JSON.stringify({ modelId, profile, settings, inputModalities })).digest('hex').slice(0, 16);
+  return { schemaVersion: 1, modelId, profile, source, fingerprint, settings, ...(inputModalities ? { inputModalities } : {}) };
 }
 
 export function validateCodexSettings(modelId: string, options: Record<string, unknown>): void {

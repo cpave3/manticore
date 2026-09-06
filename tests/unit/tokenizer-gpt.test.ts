@@ -1,7 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { AutoTokenizer } from '@huggingface/transformers';
 import { countPromptTokens, countCompletionTokens, getStreamCounter, ChatMessage } from '../../src/tokenizer/index.js';
 
 describe('countPromptTokens (GPT path)', () => {
+  it('leaves image token counts unknown without loading a text tokenizer', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('No network allowed'));
+    const tokenizerMock = vi.spyOn(AutoTokenizer, 'from_pretrained').mockRejectedValue(new Error('No tokenizer download allowed'));
+    try {
+      const messages: ChatMessage[] = [{ role: 'user', content: [{ type: 'text', text: 'Look' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw==' } }] }];
+      expect(await countPromptTokens(messages, 'openai/gpt-4o')).toBeNull();
+      expect(await countPromptTokens(messages, 'gpt-5.6-sol')).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(tokenizerMock).not.toHaveBeenCalled();
+    } finally { fetchMock.mockRestore(); tokenizerMock.mockRestore(); }
+  });
   it('returns a positive integer for a simple message', async () => {
     const messages: ChatMessage[] = [{ role: 'user', content: 'hello' }];
     const result = await countPromptTokens(messages, 'openai/gpt-4o');

@@ -1,4 +1,5 @@
 import type { LanguageModelV3CallOptions, LanguageModelV3Prompt, LanguageModelV3StreamPart } from '@ai-sdk/provider';
+import { HttpError } from '../lib/errors.js';
 import { randomUUID } from 'node:crypto';
 import { createChatGPTCodexProvider } from '../providers/chatgpt-codex/provider.js';
 import { getFreshChatGPTCodexCredentials } from './chatgpt-codex-auth.js';
@@ -174,7 +175,7 @@ function openAIToLanguageModelPrompt(messages: ChatMessage[]): LanguageModelV3Pr
       return { role: 'system', content: stringifyContent(message.content) };
     }
     if (message.role === 'user') {
-      return { role: 'user', content: [{ type: 'text', text: stringifyContent(message.content) }] };
+      return { role: 'user', content: userContent(message.content) };
     }
     if (message.role === 'tool') {
       return {
@@ -203,6 +204,25 @@ function openAIToLanguageModelPrompt(messages: ChatMessage[]): LanguageModelV3Pr
       ],
     };
   });
+}
+
+function userContent(content: unknown): Extract<LanguageModelV3Prompt[number], { role: 'user' }>['content'] {
+  if (typeof content === 'string') return [{ type: 'text', text: content }];
+  if (!Array.isArray(content)) throw invalidImageContent();
+  return content.map((part) => {
+    if (part?.type === 'text' && typeof part.text === 'string') return { type: 'text', text: part.text };
+    if (part?.type !== 'image_url' || typeof part.image_url?.url !== 'string') throw invalidImageContent();
+    let data: URL;
+    try { data = new URL(part.image_url.url); } catch { throw invalidImageContent(); }
+    if (!['data:', 'http:', 'https:'].includes(data.protocol)) throw invalidImageContent();
+    return { type: 'file', data, mediaType: data.protocol === 'data:' ? data.pathname.split(';')[0] : 'image/*',
+      providerOptions: { 'chatgpt-codex': { imageDetail: part.image_url.detail } } };
+  });
+}
+
+function invalidImageContent(): HttpError {
+  return new HttpError({ status: 400, type: 'invalid_request_error', code: 'invalid_image_input',
+    message: 'User content must contain text or image_url parts with an image data URI or HTTP(S) URL.' });
 }
 
 function openAIToLanguageModelTools(tools: unknown): LanguageModelV3CallOptions['tools'] {

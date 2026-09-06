@@ -3,6 +3,13 @@ import { describeModelCapabilities } from '../../src/services/model-capabilities
 import fixture from '../../contracts/model-settings-v1.json';
 
 describe('model capabilities', () => {
+  it('reports verified image modalities without guessing unknown Codex models', () => {
+    for (const model of ['gpt-5.6-sol', 'gpt-5.6-luna', 'gpt-6-astra'])
+      expect(describeModelCapabilities(model, 'chatgpt-codex').inputModalities).toEqual(['text', 'image']);
+    expect(describeModelCapabilities('gpt-5.3-codex-spark', 'chatgpt-codex').inputModalities).toEqual(['text']);
+    expect(describeModelCapabilities('future-codex', 'chatgpt-codex').inputModalities).toBeUndefined();
+    expect(describeModelCapabilities('kimi-k2.5', 'openai-compatible', 'https://api.synthetic.new/v1').inputModalities).toEqual(['text', 'image']);
+  });
   it('matches the shared Codex capability fixture', () => {
     const capabilities = describeModelCapabilities(fixture.state.capabilities.modelId, 'chatgpt-codex');
     expect(capabilities.settings.reasoningEffort).toEqual(fixture.state.capabilities.settings.reasoningEffort);
