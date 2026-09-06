@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createChatGPTCodexProvider } from '../providers/chatgpt-codex/provider.js';
 import { getFreshChatGPTCodexCredentials } from './chatgpt-codex-auth.js';
 import type { ForwardResult } from './proxy.js';
+import { settingsError, validateCodexSettings } from './model-capabilities.js';
 
 type ChatMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -10,6 +11,7 @@ type ChatMessage = {
   tool_call_id?: string;
   tool_calls?: Array<{
     id: string;
+    codex_reasoning?: Array<{ type: 'reasoning'; id: string; encrypted_content: string; summary: Array<{ type: 'summary_text'; text: string }> }>;
     type: 'function';
     function: {
       name: string;
@@ -39,18 +41,30 @@ export async function forwardChatGPTCodex({
   isStream: boolean;
   sessionId?: string | null;
 }): Promise<ForwardResult> {
+  if (requestBody.verbosity !== undefined && requestBody.text_verbosity !== undefined
+    && requestBody.verbosity !== requestBody.text_verbosity) {
+    throw settingsError('verbosity and text_verbosity conflict');
+  }
+  const generationOptions = {
+    thinking: requestBody.thinking === undefined ? undefined
+      : (requestBody.thinking as { type?: string })?.type === 'enabled' ? 'on'
+      : (requestBody.thinking as { type?: string })?.type === 'disabled' ? 'off' : requestBody.thinking,
+    reasoningEffort: requestBody.reasoning_effort,
+    reasoningSummary: requestBody.reasoning_summary,
+    serviceTier: requestBody.service_tier,
+    textVerbosity: requestBody.verbosity ?? requestBody.text_verbosity,
+    parallelToolCalls: requestBody.parallel_tool_calls,
+    temperature: requestBody.temperature,
+    topP: requestBody.top_p,
+  };
+  validateCodexSettings(modelPath, generationOptions);
   const provider = createChatGPTCodexProvider({
     getCredentials: getFreshChatGPTCodexCredentials,
   });
   const model = provider.languageModel(modelPath);
   const prompt = openAIToLanguageModelPrompt(requestBody.messages as ChatMessage[]);
   const tools = openAIToLanguageModelTools(requestBody.tools);
-  const providerOptions = { 'chatgpt-codex': compactJsonObject({
-    reasoningEffort: requestBody.reasoning_effort,
-    reasoningSummary: requestBody.reasoning_summary,
-    serviceTier: requestBody.service_tier,
-    textVerbosity: requestBody.text_verbosity,
-  }) };
+  const providerOptions = { 'chatgpt-codex': compactJsonObject(generationOptions) };
 
   if (!isStream) {
     const result = await model.doGenerate({
@@ -66,6 +80,7 @@ export async function forwardChatGPTCodex({
       .filter((part) => part.type === 'tool-call')
       .map((part) => ({
         id: part.toolCallId,
+        codex_reasoning: part.providerMetadata?.['chatgpt-codex']?.reasoningItems,
         type: 'function' as const,
         function: {
           name: part.toolName,
@@ -83,6 +98,8 @@ export async function forwardChatGPTCodex({
           message: {
             role: 'assistant',
             content: text || null,
+            reasoning_content: result.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join(''),
+            codex_reasoning: result.content.flatMap((part) => part.providerMetadata?.['chatgpt-codex']?.reasoningItems ?? []),
             ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
           },
           finish_reason:
@@ -181,6 +198,7 @@ function openAIToLanguageModelPrompt(messages: ChatMessage[]): LanguageModelV3Pr
           toolCallId: toolCall.id,
           toolName: toolCall.function.name,
           input: safeJsonParse(toolCall.function.arguments),
+          providerOptions: { 'chatgpt-codex': { reasoningItems: toolCall.codex_reasoning ?? [] } },
         })),
       ],
     };
@@ -254,6 +272,12 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (value.type === 'reasoning-delta' || value.type === 'reasoning-end') {
+            const delta = value.type === 'reasoning-delta' ? { reasoning_content: value.delta }
+              : { codex_reasoning: value.providerMetadata?.['chatgpt-codex']?.reasoningItems ?? [] };
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ id, object: 'chat.completion.chunk', created, model: modelPath,
+              choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`));
+          }
           if (value.type === 'text-delta') {
             controller.enqueue(
               encoder.encode(
@@ -285,6 +309,7 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
                           {
                             index: currentIndex,
                             id: value.toolCallId,
+                            codex_reasoning: value.providerMetadata?.['chatgpt-codex']?.reasoningItems,
                             type: 'function',
                             function: {
                               name: value.toolName,

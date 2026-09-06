@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { apiKeyAuth } from '../middleware/auth.js';
 import { extractSessionId } from '../middleware/session.js';
-import { findUpstreamByName, findUpstreamById, type RawUpstream } from '../services/upstreams.js';
-import { parseModelId } from '../services/model-id.js';
-import { resolveModelMapping } from '../services/model-mappings.js';
+import type { RawUpstream } from '../services/upstreams.js';
+import { resolveRoute } from '../services/resolve-route.js';
+import { describeModelCapabilities } from '../services/model-capabilities.js';
 import { forward, type ForwardResult } from '../services/proxy.js';
 import { forwardChatGPTCodex } from '../services/chatgpt-codex-proxy.js';
 import { buildLogRecord, writeLogRecord } from '../services/logging.js';
@@ -48,6 +48,14 @@ app.onError((err, c) => {
 });
 
 app.use('/chat/completions', apiKeyAuth(), extractSessionId());
+app.use('/model-capabilities', apiKeyAuth());
+app.get('/model-capabilities', (c) => {
+  const requestedModel = c.req.query('model');
+  if (!requestedModel) return c.json(buildApiError('model is required', 'invalid_request_error'), 400);
+  const { upstream, modelPath } = resolveRoute(requestedModel);
+  if (!upstream) return c.json(buildApiError('Unknown upstream', 'not_found'), 404);
+  return c.json({ ...describeModelCapabilities(modelPath, upstream.type, upstream.baseUrl), requestedModel });
+});
 
 app.post('/chat/completions', async (c) => {
   const start = Date.now();
@@ -77,29 +85,13 @@ app.post('/chat/completions', async (c) => {
   let modelPath: string;
   let upstream: RawUpstream | null = null;
 
-  const lookupName =
-    typeof modelId === 'string' && modelId.startsWith('manticore/')
-      ? modelId.slice('manticore/'.length)
-      : (modelId as string);
-
-  const mapping = resolveModelMapping(lookupName);
-
-  if (mapping) {
-    upstream = findUpstreamById(mapping.upstreamId);
-    modelPath = mapping.modelPath;
-  } else {
-    // Fall back to direct provider/model routing
-    try {
-      const parsed = parseModelId(modelId as string);
-      provider = parsed.provider;
-      modelPath = parsed.modelPath;
-      upstream = findUpstreamByName(provider);
-    } catch (err: unknown) {
-      if (err instanceof HttpError) {
-        return c.json(err.toJson(), err.status as any);
-      }
-      return c.json(buildApiError('Invalid model ID', 'invalid_request_error'), 400);
+  try {
+    ({ upstream, modelPath, provider } = resolveRoute(modelId));
+  } catch (err: unknown) {
+    if (err instanceof HttpError) {
+      return c.json(err.toJson(), err.status as any);
     }
+    return c.json(buildApiError('Invalid model ID', 'invalid_request_error'), 400);
   }
   if (!upstream) {
     const errorMsg = provider != null
@@ -160,6 +152,7 @@ app.post('/chat/completions', async (c) => {
             isStream,
           });
   } catch (err: unknown) {
+    if (err instanceof HttpError && err.status === 400) return c.json(err.toJson(), 400);
     const msg = err instanceof Error ? err.message : String(err);
     writeLogRecord(
       buildLogRecord({

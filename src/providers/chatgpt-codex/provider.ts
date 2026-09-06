@@ -12,6 +12,7 @@ import type {
   SharedV3Warning,
 } from '@ai-sdk/provider';
 import { randomUUID } from 'node:crypto';
+import { describeModelCapabilities, validateCodexSettings } from '../../services/model-capabilities.js';
 import type {
   ChatGPTCodexCredentials,
   ChatGPTCodexMessage,
@@ -143,11 +144,17 @@ export class ChatGPTCodexLanguageModel implements LanguageModelV3 {
   private buildRequestBody(options: LanguageModelV3CallOptions): BuildArgsResult {
     const warnings: SharedV3Warning[] = [];
     const providerOptions = readProviderOptions(options.providerOptions?.[CHATGPT_CODEX_PROVIDER_ID]);
+    validateCodexSettings(this.modelId, {
+      reasoningEffort: this.settings.reasoningEffort, reasoningSummary: this.settings.reasoningSummary,
+      textVerbosity: this.settings.textVerbosity, serviceTier: this.settings.serviceTier,
+      ...providerOptions, temperature: options.temperature, topP: options.topP,
+    });
     const modelDefaults = MODEL_CONTEXT[this.modelId];
     const input = convertPrompt(options.prompt, warnings);
     const reasoningEffort =
       providerOptions.reasoningEffort ?? this.settings.reasoningEffort ?? defaultReasoningEffort(this.modelId);
-    const reasoningSummary = providerOptions.reasoningSummary ?? this.settings.reasoningSummary ?? 'auto';
+    const reasoningSummary = providerOptions.reasoningSummary !== undefined
+      ? providerOptions.reasoningSummary : this.settings.reasoningSummary !== undefined ? this.settings.reasoningSummary : 'auto';
     const include: string[] = [];
     const body: ChatGPTCodexRequest = {
       model: this.modelId,
@@ -155,7 +162,7 @@ export class ChatGPTCodexLanguageModel implements LanguageModelV3 {
       stream: true,
       instructions: extractInstructions(options.prompt),
       input,
-      parallel_tool_calls: true,
+      parallel_tool_calls: providerOptions.parallelToolCalls ?? true,
       tool_choice: 'auto',
       text: {
         verbosity: providerOptions.textVerbosity ?? this.settings.textVerbosity ?? 'low',
@@ -164,7 +171,7 @@ export class ChatGPTCodexLanguageModel implements LanguageModelV3 {
 
     if (reasoningEffort && reasoningEffort !== 'none') {
       body.reasoning = {
-        effort: mapReasoningEffort(this.modelId, reasoningEffort),
+        effort: reasoningEffort,
         summary: reasoningSummary === 'off' ? null : reasoningSummary,
       };
       include.push('reasoning.encrypted_content');
@@ -221,15 +228,7 @@ function requireResponseBody(response: Response): ReadableStream<Uint8Array> {
 }
 
 function defaultReasoningEffort(modelId: string): ChatGPTCodexProviderOptions['reasoningEffort'] {
-  if (modelId === 'gpt-5.3-codex-spark') return 'low';
-  if (modelId.startsWith('gpt-5') || modelId.startsWith('codex')) return 'medium';
-  return undefined;
-}
-
-function mapReasoningEffort(modelId: string, effort: NonNullable<ChatGPTCodexProviderOptions['reasoningEffort']>): string {
-  if (modelId === 'gpt-5.3-codex-spark' && effort === 'xhigh') return 'xhigh';
-  if (effort === 'minimal') return 'low';
-  return effort;
+  return describeModelCapabilities(modelId, 'chatgpt-codex').settings.reasoningEffort.default as ChatGPTCodexProviderOptions['reasoningEffort'];
 }
 
 function extractInstructions(prompt: LanguageModelV3Prompt): string {
@@ -252,6 +251,18 @@ function convertPrompt(prompt: LanguageModelV3Prompt, warnings: SharedV3Warning[
       continue;
     }
     if (message.role === 'assistant') {
+      const seen = new Set<string>();
+      for (const part of message.content) {
+        const items = part.providerOptions?.['chatgpt-codex']?.reasoningItems;
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          if (!item || typeof item !== 'object' || Array.isArray(item) || item.type !== 'reasoning'
+            || typeof item.id !== 'string' || typeof item.encrypted_content !== 'string' || seen.has(item.id)) continue;
+          seen.add(item.id);
+          messages.push({ type: 'reasoning', id: item.id, encrypted_content: item.encrypted_content,
+            summary: Array.isArray(item.summary) ? item.summary.filter((entry): entry is { type: 'summary_text'; text: string } => !!entry && typeof entry === 'object' && !Array.isArray(entry) && entry.type === 'summary_text' && typeof entry.text === 'string') : [] });
+        }
+      }
       const content = partsToText(message.content.filter((part) => part.type !== 'tool-call'), warnings);
       if (content) {
         messages.push({
@@ -388,6 +399,7 @@ function streamCodexResponse(
     async start(controller) {
       controller.enqueue({ type: 'stream-start', warnings });
       let textStarted = false;
+      const reasoningItems: Array<Record<string, any>> = [];
       let finalUsage = usageFromCodex();
       let finalReason = finishReasonFromCodex('completed');
       try {
@@ -397,6 +409,15 @@ function streamCodexResponse(
             continue;
           }
           const record = event as Record<string, any>;
+          if (record.type === 'response.output_item.done' && record.item?.type === 'reasoning') {
+            const item = record.item;
+            if (typeof item.encrypted_content === 'string') reasoningItems.push(item);
+            const id = String(item.id ?? `reasoning-${reasoningItems.length}`);
+            const summary = (item.summary ?? []).filter((part: any) => part.type === 'summary_text').map((part: any) => part.text).join('\n');
+            controller.enqueue({ type: 'reasoning-start', id });
+            if (summary) controller.enqueue({ type: 'reasoning-delta', id, delta: summary });
+            controller.enqueue({ type: 'reasoning-end', id, providerMetadata: { 'chatgpt-codex': { reasoningItems: typeof item.encrypted_content === 'string' ? [item] : [] } } });
+          }
           if (record.type === 'response.output_text.delta' && typeof record.delta === 'string') {
             if (!textStarted) {
               textStarted = true;
@@ -410,6 +431,7 @@ function streamCodexResponse(
               toolCallId: String(record.item.call_id ?? record.item.id ?? randomUUID()),
               toolName: String(record.item.name ?? 'unknown'),
               input: String(record.item.arguments ?? '{}'),
+              providerMetadata: { 'chatgpt-codex': { reasoningItems } },
             });
           }
           if (record.type === 'response.completed' || record.type === 'response.done' || record.type === 'response.incomplete') {
@@ -440,6 +462,7 @@ async function collectCodexStream(body: ReadableStream<Uint8Array>, includeRaw: 
   let usage = usageFromCodex();
   let finishReason = finishReasonFromCodex('completed');
   const content: LanguageModelV3Content[] = [];
+  const reasoning = new Map<string, string>();
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -448,6 +471,10 @@ async function collectCodexStream(body: ReadableStream<Uint8Array>, includeRaw: 
         text += value.delta;
       } else if (value.type === 'tool-call') {
         content.push(value);
+      } else if (value.type === 'reasoning-delta') {
+        reasoning.set(value.id, (reasoning.get(value.id) ?? '') + value.delta);
+      } else if (value.type === 'reasoning-end') {
+        content.push({ type: 'reasoning', text: reasoning.get(value.id) ?? '', providerMetadata: value.providerMetadata });
       } else if (value.type === 'finish') {
         usage = value.usage;
         finishReason = value.finishReason;

@@ -8,6 +8,8 @@
 
 ## Quick start
 
+See [model generation settings](docs/model-settings.md) for capability discovery and Codex translation.
+
 ```bash
 # Install dependencies
 pnpm install

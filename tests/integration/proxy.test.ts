@@ -50,6 +50,28 @@ async function getLogRows(db: ReturnType<typeof getDb>) {
 }
 
 describe('proxy integration', () => {
+  it('requires client authentication and resolves capability aliases using request routing', async () => {
+    await withFreshDb(async () => {
+      expect((await proxyApp.request('/model-capabilities?model=sol')).status).toBe(401);
+      const db = getDb();
+      const client = await makeClient(db);
+      const upstream = await makeUpstream(db, { name: 'codex', type: 'chatgpt-codex' });
+      const { createMapping, updateMapping } = await import('../../src/services/model-mappings.js');
+      const mapping = createMapping({ abstractName: 'sol', upstreamId: upstream.id, modelPath: 'gpt-5.6-sol' });
+      const response = await proxyApp.request('/model-capabilities?model=sol', {
+        headers: { Authorization: `Bearer ${client.apiKey}` },
+      });
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.modelId).toBe('gpt-5.6-sol');
+      expect(body.requestedModel).toBe('sol');
+      expect(body.settings.reasoningEffort.values).toContain('max');
+      updateMapping(mapping.id, { modelPath: 'gpt-5.4' });
+      const rejected = await proxyApp.request('/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${client.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'sol', messages: [], reasoning_effort: 'max' }) });
+      expect(rejected.status).toBe(400);
+      expect((await rejected.json()).error.code).toBe('invalid_model_settings');
+    });
+  });
   it('400 — missing model (valid auth, body {messages:[]})', async () => {
     await withFreshDb(async () => {
       const db = getDb();
@@ -129,7 +151,7 @@ describe('proxy integration', () => {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${client.apiKey}`,
           },
-          body: JSON.stringify({ model: 'fake/gpt-4', messages: [{ role: 'user', content: 'hello' }] }),
+          body: JSON.stringify({ model: 'fake/gpt-4', messages: [{ role: 'user', content: 'hello' }], thinking: { type: 'disabled' }, temperature: 0, parallel_tool_calls: false, custom_option: { value: 0 } }),
         });
 
         expect(res.status).toBe(200);
@@ -144,6 +166,7 @@ describe('proxy integration', () => {
         const [, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string>; body: string }];
         const sentBody = JSON.parse(init.body);
         expect(sentBody.model).toBe('gpt-4');
+        expect(sentBody).toMatchObject({ thinking: { type: 'disabled' }, temperature: 0, parallel_tool_calls: false, custom_option: { value: 0 } });
         const headers = new Headers(init.headers as Record<string, string>);
         expect(headers.get('Authorization')).toBe('Bearer up-secret');
 

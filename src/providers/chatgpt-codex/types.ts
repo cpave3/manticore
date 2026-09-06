@@ -10,10 +10,11 @@ export type ChatGPTCodexModelId =
   | 'codex-mini-latest'
   | (string & {});
 
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type ReasoningSummary = 'auto' | 'concise' | 'detailed' | 'off' | 'on' | null;
 
 export type ChatGPTCodexProviderOptions = {
+  parallelToolCalls?: boolean;
   reasoningEffort?: ReasoningEffort;
   reasoningSummary?: ReasoningSummary;
   serviceTier?: 'auto' | 'default' | 'flex' | 'priority' | string;
@@ -28,6 +29,7 @@ export type ChatGPTCodexCredentials = {
 };
 
 export type ChatGPTCodexMessage =
+  | { type: 'reasoning'; id: string; encrypted_content: string; summary: Array<{ type: 'summary_text'; text: string }> }
   | {
       role: 'user' | 'assistant';
       content: string | null;

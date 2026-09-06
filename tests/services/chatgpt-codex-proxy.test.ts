@@ -38,8 +38,71 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 describe('forwardChatGPTCodex', () => {
+  it.each([false, true])('preserves reasoning summaries and opaque tool-continuation data (stream=%s)', async (isStream) => {
+    const reasoning = { type: 'reasoning', id: 'rs_1', encrypted_content: 'opaque-ciphertext', summary: [{ type: 'summary_text', text: 'A short summary' }] };
+    const fetchMock = vi.fn(async () => new Response(sse([
+      { type: 'response.output_item.done', item: reasoning },
+      { type: 'response.output_item.done', item: { type: 'function_call', call_id: 'call_1', name: 'test', arguments: '{}' } },
+      { type: 'response.completed', response: { status: 'completed' } },
+    ])));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await forwardChatGPTCodex({ modelPath: 'gpt-5.6-sol', isStream, requestBody: { messages: [{ role: 'user', content: 'test' }] } });
+    const output = await readStream(result.body);
+    expect(output).toContain('reasoning_content');
+    expect(output).toContain('A short summary');
+    expect(output).toContain('codex_reasoning');
+    expect(output).toContain('opaque-ciphertext');
+    fetchMock.mockImplementation(async (_url?: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body));
+      expect(request.input).toContainEqual(reasoning);
+      expect(request.input.filter((item: { role?: string }) => item.role === 'assistant')).not.toContainEqual(expect.objectContaining({ content: expect.stringContaining('opaque-ciphertext') }));
+      return new Response(sse([{ type: 'response.completed', response: { status: 'completed' } }]));
+    });
+    await forwardChatGPTCodex({ modelPath: 'gpt-5.6-sol', isStream: false, requestBody: { messages: [
+      { role: 'assistant', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'test', arguments: '{}' }, codex_reasoning: [reasoning] }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'done' },
+    ] } });
+  });
+  it('preserves explicit generation settings through the Codex request', async () => {
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.reasoning).toEqual({ effort: 'max', summary: null });
+      expect(body.parallel_tool_calls).toBe(false);
+      expect(body.text).toEqual({ verbosity: 'high' });
+      expect(body.service_tier).toBe('priority');
+      return new Response(sse([{ type: 'response.completed', response: { status: 'completed' } }]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await forwardChatGPTCodex({
+      modelPath: 'gpt-5.6-sol', isStream: false,
+      requestBody: {
+        messages: [{ role: 'user', content: 'hello' }], reasoning_effort: 'max',
+        reasoning_summary: null, parallel_tool_calls: false, verbosity: 'high', service_tier: 'priority',
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { reasoning_effort: 'none' },
+    { reasoning_effort: ['high'] },
+    { thinking: { type: 'disabled' } },
+    { reasoning_effort: 'invented' },
+    { verbosity: 'high', text_verbosity: 'low' },
+    { parallel_tool_calls: 'false' },
+    { temperature: 0 },
+  ])('rejects unsupported or conflicting settings before sending a request: %j', async (settings) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(forwardChatGPTCodex({
+      modelPath: 'gpt-5.6-sol', isStream: true,
+      requestBody: { messages: [], ...settings },
+    })).rejects.toMatchObject({ status: 400 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('forwards OpenAI chat tools to Codex and streams function calls back as tool_calls', async () => {
