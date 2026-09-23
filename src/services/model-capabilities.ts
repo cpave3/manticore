@@ -32,9 +32,9 @@ const settingTypes: Record<string, SettingCapability['type']> = {
 // Exact supported_reasoning_levels from Codex model metadata, 2026-09-06.
 // Forward these values unchanged; do not infer support from public API names.
 const codexEfforts: Record<string, string[]> = Object.fromEntries([
-  ...['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra']
+  ...['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-6-astra', 'gpt-6-sol']
     .map((model) => [model, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']]),
-  ...['gpt-5.6-luna', 'gpt-reserve', 'codex-auto-review']
+  ...['gpt-5.6-luna', 'gpt-6-luna', 'gpt-reserve', 'codex-auto-review']
     .map((model) => [model, ['low', 'medium', 'high', 'xhigh', 'max']]),
   ...['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.3-codex-spark']
     .map((model) => [model, ['low', 'medium', 'high', 'xhigh']]),

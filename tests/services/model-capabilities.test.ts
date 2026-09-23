@@ -15,6 +15,16 @@ describe('model capabilities', () => {
     expect(capabilities.settings.reasoningEffort).toEqual(fixture.state.capabilities.settings.reasoningEffort);
     expect(capabilities.settings.parallelToolCalls).toEqual(fixture.state.capabilities.settings.parallelToolCalls);
   });
+  it('accepts settings for gpt-6-sol', () => {
+    const settings = describeModelCapabilities('gpt-6-sol', 'chatgpt-codex').settings;
+    expect(settings.reasoningEffort.values).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+    expect(settings.parallelToolCalls).toEqual({ status: 'supported', type: 'boolean', default: true });
+  });
+  it('accepts settings for gpt-6-luna', () => {
+    const settings = describeModelCapabilities('gpt-6-luna', 'chatgpt-codex').settings;
+    expect(settings.reasoningEffort.values).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(settings.parallelToolCalls).toEqual({ status: 'supported', type: 'boolean', default: true });
+  });
   it.each(['GLM-5.3', 'kimi-k2.7-code'])('does not offer Thinking Off for %s', (modelId) => {
     expect(describeModelCapabilities(modelId, 'openai-compatible', 'https://api.synthetic.new/v1').settings.thinking.values).toEqual(['on']);
   });
