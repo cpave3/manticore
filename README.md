@@ -167,6 +167,47 @@ curl -s -X POST http://localhost:3456/v1/chat/completions \
 
 ---
 
+## Reporting usage Manticore did not proxy
+
+A Client that must call its model provider directly can still have its usage recorded: it reports each request after the fact to `POST /v1/usage`, with its API key. Manticore stores one LogRecord per reported request, attributed to that Client, and shows it in the Dashboard beside proxied requests. Nothing is forwarded and no message content is sent or stored.
+
+```bash
+curl -s -X POST http://localhost:3456/v1/usage \
+  -H "authorization: Bearer $MANTICORE_API_KEY" \
+  -H 'content-type: application/json' \
+  -H 'x-session-id: thread-42' \
+  -d '{
+    "records": [{
+      "id": "thread-42:turn-7:0",
+      "model": "claude-opus-5-5",
+      "upstream": "anthropic",
+      "prompt_tokens": 1200,
+      "completion_tokens": 300,
+      "cache_read_tokens": 1000,
+      "cache_creation_tokens": 150,
+      "latency_ms": 4200,
+      "time_to_first_token_ms": 800,
+      "finish_reason": "end_turn",
+      "started_at": 1790000000000
+    }]
+  }'
+# {"accepted":1,"duplicates":0}
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `model` | yes | The model that answered, as the reporter names it. Stored as the LogRecord's model. |
+| `prompt_tokens`, `completion_tokens` | yes | Token counts. `prompt_tokens` is the whole prompt, cached tokens included. |
+| `cache_read_tokens`, `cache_creation_tokens` | no | How much of the prompt the provider's prompt cache served or stored. Together they cannot exceed `prompt_tokens`. |
+| `upstream` | no | A label for the provider that served the request. It appears in the upstream breakdown; it does not have to be a registered Upstream. |
+| `id` | no | The reporter's own id for the request. A record with an id is stored once per Client however often it is sent, so a report whose answer was lost can be sent again. |
+| `latency_ms`, `time_to_first_token_ms`, `finish_reason` | no | As measured by the reporter. `latency_ms` defaults to 0. |
+| `started_at` | no | When the request began, in milliseconds since the Unix epoch. Defaults to when the report arrived. |
+
+A report holds 1 to 500 records and is all-or-nothing: one invalid record rejects the whole report with `400`. `X-Session-Id` applies to every record in the report. The response counts the records `accepted` and the `duplicates` that were already stored.
+
+---
+
 ## Dashboard
 
 When running in production mode (`NODE_ENV=production` or when a `dashboard/dist/index.html` exists), Manticore serves the dashboard static files alongside the API.

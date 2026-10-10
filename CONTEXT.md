@@ -37,8 +37,16 @@ A Hugging Face model tokenizer loaded by name from the Transformers ecosystem. U
 _Avoid_: Encoder, vocabulary
 
 **LogRecord**:
-The persisted record of a single Request. Contains metadata only: Client, Model ID, Upstream, timestamps, token counts, latency metrics, finish reason, and status. Request and response content (messages, completions) are not stored.
+The persisted record of a single Request, or of a single request described by Reported Usage. Contains metadata only: Client, Model ID, Upstream, timestamps, token counts, latency metrics, finish reason, and status. Request and response content (messages, completions) are not stored.
 _Avoid_: Log entry, event
+
+**Reported Usage**:
+The usage of a request a Client made to a model provider itself, sent to Manticore afterwards through `POST /v1/usage`. Each reported request produces a LogRecord attributed to the reporting Client, with no Attempt and no registered Upstream: it may name the provider that served it as a label only. For Clients that cannot be proxied.
+_Avoid_: External usage, telemetry
+
+**Cache Read Token** / **Cache Creation Token**:
+A Prompt Token the provider's prompt cache served, or stored, as the provider reported it. A breakdown of the Prompt Token count, never added to it. Recorded for Reported Usage only; null when unknown.
+_Avoid_: Cached token (which of the two is ambiguous)
 
 **Dashboard**:
 A web application served by the Manticore process alongside the API endpoint. Unauthenticated, intended for local or trusted-network access. Shows current usage data queried from the local store on page load; may auto-refresh on a configurable interval or provide a manual refresh control.
@@ -52,6 +60,7 @@ An Upstream is registered by a unique provider name, a base URL, an optional API
 
 - A **Client** makes zero or more **Requests**
 - A **Request** produces exactly one **LogRecord**
+- A **Client** reports zero or more requests as **Reported Usage**; each produces exactly one **LogRecord**, however often its report is sent
 - A **Request** contains one or more **Attempts**
 - An **Attempt** targets exactly one **Upstream**
 - A **Request** specifies exactly one **Model ID**

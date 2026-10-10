@@ -34,6 +34,8 @@ export type LogRecordResponse = {
   promptTokens: number | null;
   completionTokens: number | null;
   totalTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
   latencyMs: number;
   timeToFirstTokenMs: number | null;
   finishReason: string | null;

@@ -10,6 +10,7 @@ import upstreamsRoutes from './routes/upstreams.js';
 import modelMappingsRoutes from './routes/model-mappings.js';
 import dashboardRoutes from './routes/dashboard.js';
 import proxyRoutes from './routes/proxy.js';
+import usageRoutes from './routes/usage.js';
 
 export function createApp(): Hono {
   const config = loadConfig();
@@ -28,6 +29,7 @@ export function createApp(): Hono {
   app.route('/api/upstreams', upstreamsRoutes);
   app.route('/api/model-mappings', modelMappingsRoutes);
   app.route('/api/dashboard', dashboardRoutes);
+  app.route('/v1/usage', usageRoutes);
   app.route('/v1', proxyRoutes);
 
   // Dashboard static files

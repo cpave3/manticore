@@ -46,6 +46,8 @@ export const logRecords = sqliteTable('log_records', {
   promptTokens: integer('prompt_tokens'),
   completionTokens: integer('completion_tokens'),
   totalTokens: integer('total_tokens'),
+  cacheReadTokens: integer('cache_read_tokens'),
+  cacheCreationTokens: integer('cache_creation_tokens'),
   latencyMs: integer('latency_ms').notNull(),
   timeToFirstTokenMs: integer('time_to_first_token_ms'),
   finishReason: text('finish_reason'),

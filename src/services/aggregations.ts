@@ -279,6 +279,8 @@ export async function eventLog(params: {
     promptTokens: row.promptTokens ?? null,
     completionTokens: row.completionTokens ?? null,
     totalTokens: row.totalTokens ?? null,
+    cacheReadTokens: row.cacheReadTokens ?? null,
+    cacheCreationTokens: row.cacheCreationTokens ?? null,
     latencyMs: row.latencyMs,
     timeToFirstTokenMs: row.timeToFirstTokenMs ?? null,
     finishReason: row.finishReason ?? null,

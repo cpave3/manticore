@@ -177,6 +177,8 @@ function DetailGrid({ row }: { row: LogRecordResponse }) {
     { label: 'Time to First Token', value: row.timeToFirstTokenMs != null ? `${row.timeToFirstTokenMs}ms` : '—' },
     { label: 'Finish Reason', value: row.finishReason ?? '—' },
     { label: 'Total Tokens', value: row.totalTokens != null ? row.totalTokens.toLocaleString() : '—' },
+    { label: 'Cache Read Tokens', value: row.cacheReadTokens != null ? row.cacheReadTokens.toLocaleString() : '—' },
+    { label: 'Cache Creation Tokens', value: row.cacheCreationTokens != null ? row.cacheCreationTokens.toLocaleString() : '—' },
     { label: 'Record ID', value: row.id },
   ];
   return (
