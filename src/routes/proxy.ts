@@ -49,6 +49,10 @@ app.onError((err, c) => {
 
 app.use('/chat/completions', apiKeyAuth(), extractSessionId());
 app.use('/model-capabilities', apiKeyAuth());
+app.use('/models', apiKeyAuth());
+app.get('/models', (c) => {
+  return c.json({ object: 'list', data: [] });
+});
 app.get('/model-capabilities', (c) => {
   const requestedModel = c.req.query('model');
   if (!requestedModel) return c.json(buildApiError('model is required', 'invalid_request_error'), 400);
