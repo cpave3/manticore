@@ -213,7 +213,7 @@ curl -s http://localhost:3456/v1/models \
 #             "output":{"status":"discovered","value":32768}}}, …]}
 ```
 
-Limits are fetched from each upstream's own `/models` catalogue with the upstream's credential, cached per upstream identity for five minutes, and re-verified at most daily; unshareable per-session headers never enter discovery. `GET /v1/model-capabilities?model=` includes the same `limits` block for its resolved route. See [discovered limits](docs/model-settings.md#discovered-limits).
+Limits are fetched from each upstream's own `/models` catalogue with the upstream's credential and cached per upstream identity: one fetch serves requests for five minutes, and a previously verified limit stays usable for at most 24 hours from its last verification. Unshareable per-session headers never enter discovery. `GET /v1/model-capabilities?model=` includes the same `limits` block for its resolved route. See [discovered limits](docs/model-settings.md#discovered-limits).
 
 ---
 

@@ -25,3 +25,9 @@
 
 - [x] 4.1 `docs/model-settings.md` "Discovered limits" section
 - [x] 4.2 `README.md` model discovery section
+
+## 5. Review pass 1 fixes
+
+- [x] 5.1 Bulk catalogue freshness from cached fields, so a direct-only listing with every field past the max verified age awaits the refresh and recovers on the same request (new direct-only test with a delayed successful refresh)
+- [x] 5.2 Suppress direct entries whose public id a mapping already owns, even when both resolve to the same route (new collision test)
+- [x] 5.3 README states the five-minute refresh interval and the 24-hour max verified age separately

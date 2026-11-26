@@ -58,9 +58,11 @@ app.use('/chat/completions', apiKeyAuth(), extractSessionId());
 app.use('/model-capabilities', apiKeyAuth());
 app.use('/models', apiKeyAuth());
 app.get('/models', async (c) => {
+  // A mapping owns its public id: the direct listing never repeats it.
+  const aliasIds = new Set(listMappings().map((m) => m.abstractName));
   const [aliasEntries, directEntries] = await Promise.all([
     listAliasEntries(),
-    listDirectEntries(),
+    listDirectEntries(aliasIds),
   ]);
   const data = [...aliasEntries, ...directEntries].sort((a, b) =>
     a.id < b.id ? -1 : a.id > b.id ? 1 : 0
@@ -290,14 +292,17 @@ async function listAliasEntries(): Promise<ModelsEntry[]> {
 }
 
 /** Models discovered in each upstream's catalogue, as direct `{provider}/{model}` routes. */
-async function listDirectEntries(): Promise<ModelsEntry[]> {
+async function listDirectEntries(aliasIds: Set<string>): Promise<ModelsEntry[]> {
   const perUpstream = await Promise.all(
     listRawUpstreams().map(async (upstream) => {
       const catalogue = await getUpstreamCatalogue(upstream);
       if (!catalogue) return [];
       return catalogue.flatMap((model) => {
         const publicId = `${upstream.name}/${model.id}`;
-        // List the direct spelling only when it actually routes there — a
+        // A mapping owns its public id; the direct spelling of the same id is
+        // never listed separately, even when both resolve to the same route.
+        if (aliasIds.has(publicId)) return [];
+        // And list a direct spelling only when it actually routes there — a
         // mapping named "{provider}/{model}" would intercept it.
         let route: ReturnType<typeof resolveRoute>;
         try {

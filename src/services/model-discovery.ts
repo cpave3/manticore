@@ -148,13 +148,18 @@ async function ensureCatalogue(upstream: RawUpstream, modelPath?: string): Promi
 }
 
 /**
- * Whether a request for `modelPath` has anything fresh to serve. The bulk
- * catalogue listing (no model path) only ever waits on a completely empty
- * identity; per-model requests also wait when their own values are absent or
- * past the max verified age.
+ * Whether a request for `modelPath` has anything fresh to serve. Requests wait
+ * on the fetch when their own values are absent or past the max verified age —
+ * per-model, and for the bulk catalogue listing when no cached model has a
+ * fresh field left.
  */
 function nothingFreshFor(entry: CatalogueEntry, modelPath?: string): boolean {
-  if (modelPath === undefined) return entry.models.size === 0;
+  if (modelPath === undefined) {
+    for (const model of entry.models.values()) {
+      if (hasFreshField(model, Date.now())) return false;
+    }
+    return true;
+  }
   const model = entry.models.get(modelPath);
   if (!model) return true;
   return !hasFreshField(model, Date.now());

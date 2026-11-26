@@ -805,6 +805,72 @@ describe('GET /v1/models — discovery cache behaviour', () => {
     });
   });
 
+  it('waits for the refresh and recovers a fully expired direct catalogue on the same request', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      // No mappings: this upstream is reachable only through direct routes.
+      await makeUpstream(db, { name: 'go', baseUrl: 'https://api.example.com/v1', apiKey: 'k' });
+      const dateSpy = vi.spyOn(Date, 'now');
+
+      let resolveRefresh!: (body: Response) => void;
+      const pendingRefresh = new Promise<Response>((resolve) => {
+        resolveRefresh = resolve;
+      });
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse(catalogueBody([{ id: 'kimi-k3', object: 'model', limit: limit(262144) }]))
+        )
+        .mockImplementationOnce(() => pendingRefresh);
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      dateSpy.mockReturnValue(T0);
+      const first = await requestModels(client);
+      expect(first.data.find((m: { id: string }) => m.id === 'go/kimi-k3').limits.context).toEqual({
+        status: 'discovered',
+        value: 262144,
+      });
+
+      // Past the max verified age, with the healthy upstream's refresh still
+      // in flight: the request waits for it instead of answering unknown.
+      dateSpy.mockReturnValue(T0 + DISCOVERY_CACHE_CONSTANTS.maxStaleMs + 1000);
+      const pendingResponse = proxyApp.request('/models', { headers: authHeaders(client) });
+      await flushBackground();
+      resolveRefresh(
+        jsonResponse(catalogueBody([{ id: 'kimi-k3', object: 'model', limit: limit(524288) }]))
+      );
+      const body = await (await pendingResponse).json();
+      expect(body.data.find((m: { id: string }) => m.id === 'go/kimi-k3').limits.context).toEqual({
+        status: 'discovered',
+        value: 524288,
+      });
+    });
+  });
+
+  it('lists a mapping whose name collides with its direct route exactly once, as the alias', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      const go = await makeUpstream(db, { name: 'go', baseUrl: 'https://api.example.com/v1', apiKey: 'k' });
+      // The alias name IS the direct spelling, and it resolves to the same route.
+      const { createMapping } = await import('../../src/services/model-mappings.js');
+      createMapping({ abstractName: 'go/kimi', upstreamId: go.id, modelPath: 'kimi' });
+
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse(catalogueBody([{ id: 'kimi', object: 'model', limit: limit(262144) }]))
+      );
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      const body = await requestModels(client);
+      const entries = body.data.filter((m: { id: string }) => m.id === 'go/kimi');
+      expect(entries).toHaveLength(1);
+      expect(entries[0].ownedBy).toBe('go');
+      expect(entries[0].modelPath).toBe('kimi');
+      expect(entries[0].limits.context).toEqual({ status: 'discovered', value: 262144 });
+    });
+  });
+
   it('ages a disappeared catalogue model out of the direct listing', async () => {
     await withFreshDb(async () => {
       const db = getDb();
