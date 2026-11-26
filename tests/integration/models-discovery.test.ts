@@ -371,6 +371,116 @@ describe('GET /v1/models — alias limit discovery', () => {
 // Keep the imported constants referenced so tests can assert against them as slices grow.
 void DISCOVERY_CACHE_CONSTANTS;
 
+describe('GET /v1/model-capabilities — discovered limits', () => {
+  it('adds a discovered limits block while keeping the existing capability fields intact', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      const upstream = await makeUpstream(db, {
+        name: 'go',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'go-key',
+      });
+      const { createMapping } = await import('../../src/services/model-mappings.js');
+      createMapping({ abstractName: 'go-kimi', upstreamId: upstream.id, modelPath: 'kimi-k3' });
+
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse(
+          catalogueBody([{ id: 'kimi-k3', object: 'model', limit: limit(262144, 131072, 32768) }])
+        )
+      );
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      const res = await proxyApp.request('/model-capabilities?model=go-kimi', {
+        headers: authHeaders(client),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      // The additive limits block, resolved through the same route as chat.
+      expect(body.limits).toEqual({
+        context: { status: 'discovered', value: 262144 },
+        input: { status: 'discovered', value: 131072 },
+        output: { status: 'discovered', value: 32768 },
+      });
+      // Existing capability consumers keep their fields unchanged.
+      expect(body.schemaVersion).toBe(1);
+      expect(body.modelId).toBe('kimi-k3');
+      expect(body.requestedModel).toBe('go-kimi');
+      expect(body.profile).toBe('unknown');
+      expect(body.source).toBe('unknown');
+      expect(typeof body.fingerprint).toBe('string');
+      expect(body.settings.thinking.status).toBe('unknown');
+      expect(body.inputModalities).toBeUndefined();
+    });
+  });
+
+  it('serves unknown limits for codex routes with no fetch, keeping the codex profile', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      const codex = await makeUpstream(db, { name: 'codex', type: 'chatgpt-codex' });
+      const { createMapping } = await import('../../src/services/model-mappings.js');
+      createMapping({ abstractName: 'sol', upstreamId: codex.id, modelPath: 'gpt-5.6-sol' });
+
+      const fetchMock = vi.fn().mockRejectedValue(new Error('no catalogue expected'));
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      const res = await proxyApp.request('/model-capabilities?model=sol', {
+        headers: authHeaders(client),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.limits).toEqual({
+        context: { status: 'unknown' },
+        input: { status: 'unknown' },
+        output: { status: 'unknown' },
+      });
+      expect(body.profile).toBe('codex');
+      expect(body.settings.reasoningEffort.values).toContain('max');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it('keeps the capability fingerprint stable while discovered limits change', async () => {
+    await withFreshDb(async () => {
+      const { client } = await setupAliasDb();
+      const dateSpy = vi.spyOn(Date, 'now');
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(catalogueBody([{ id: 'kimi-k3', object: 'model', limit: limit(262144) }]))
+        );
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      const caps = () =>
+        proxyApp.request('/model-capabilities?model=go-kimi', { headers: authHeaders(client) });
+
+      dateSpy.mockReturnValue(T0);
+      const first = await (await caps()).json();
+      expect(first.limits.context).toEqual({ status: 'discovered', value: 262144 });
+
+      dateSpy.mockReturnValue(T0 + DISCOVERY_CACHE_CONSTANTS.refreshIntervalMs + 1000);
+      fetchMock.mockResolvedValue(
+        jsonResponse(catalogueBody([{ id: 'kimi-k3', object: 'model', limit: limit(999999) }]))
+      );
+      const second = await (await caps()).json();
+      // Fresh values exist, so this response serves last-known and refreshes
+      // behind itself.
+      expect(second.limits.context).toEqual({ status: 'discovered', value: 262144 });
+      expect(second.fingerprint).toBe(first.fingerprint);
+      await flushBackground();
+
+      dateSpy.mockReturnValue(T0 + DISCOVERY_CACHE_CONSTANTS.refreshIntervalMs + 2000);
+      const third = await (await caps()).json();
+      expect(third.limits.context).toEqual({ status: 'discovered', value: 999999 });
+      // Limits are additive discovery data: the capabilities fingerprint a
+      // settings consumer keys on does not move with them.
+      expect(third.fingerprint).toBe(first.fingerprint);
+    });
+  });
+});
+
 describe('GET /v1/models — discovery cache behaviour', () => {
   it('throttles: one catalogue fetch serves every request inside the refresh interval', async () => {
     await withFreshDb(async () => {

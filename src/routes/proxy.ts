@@ -67,12 +67,13 @@ app.get('/models', async (c) => {
   );
   return c.json({ object: 'list', data });
 });
-app.get('/model-capabilities', (c) => {
+app.get('/model-capabilities', async (c) => {
   const requestedModel = c.req.query('model');
   if (!requestedModel) return c.json(buildApiError('model is required', 'invalid_request_error'), 400);
   const { upstream, modelPath } = resolveRoute(requestedModel);
   if (!upstream) return c.json(buildApiError('Unknown upstream', 'not_found'), 404);
-  return c.json({ ...describeModelCapabilities(modelPath, upstream.type, upstream.baseUrl), requestedModel });
+  const limits = await getModelLimits(upstream, modelPath);
+  return c.json({ ...describeModelCapabilities(modelPath, upstream.type, upstream.baseUrl), limits, requestedModel });
 });
 
 app.post('/chat/completions', async (c) => {
