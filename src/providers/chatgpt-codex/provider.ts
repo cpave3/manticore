@@ -360,6 +360,28 @@ function usageFromCodex(raw?: ChatGPTCodexUsage): LanguageModelV3Usage {
   };
 }
 
+/**
+ * Codex failed partway through a response: a `response.failed` or `error`
+ * event, or a stream that ended before the response did. `code` is Codex's
+ * error code, when it sent one.
+ */
+export class CodexStreamError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = 'CodexStreamError';
+    this.code = code;
+  }
+}
+
+/** The error a `response.failed` or `error` event carries. */
+function codexStreamError(details: unknown, fallback: string): CodexStreamError {
+  const record = details && typeof details === 'object' ? (details as Record<string, unknown>) : {};
+  const message = typeof record.message === 'string' && record.message ? record.message : fallback;
+  return new CodexStreamError(message, typeof record.code === 'string' ? record.code : undefined);
+}
+
 function finishReasonFromCodex(status?: string, incompleteReason?: string): LanguageModelV3FinishReason {
   if (status === 'incomplete' || incompleteReason === 'max_output_tokens') {
     return { unified: 'length', raw: incompleteReason ?? status };
@@ -412,6 +434,8 @@ function streamCodexResponse(
       const reasoningItems: Array<Record<string, any>> = [];
       let finalUsage = usageFromCodex();
       let finalReason = finishReasonFromCodex('completed');
+      // Only a terminal event means the response is whole.
+      let ended = false;
       try {
         for await (const event of parseSSE(body, includeRaw)) {
           if (isRawPart(event)) {
@@ -448,8 +472,16 @@ function streamCodexResponse(
             const response = record.response ?? {};
             finalUsage = usageFromCodex(response.usage);
             finalReason = finishReasonFromCodex(response.status, response.incomplete_details?.reason);
+            ended = true;
+          }
+          if (record.type === 'response.failed') {
+            throw codexStreamError(record.response?.error, 'Codex response failed');
+          }
+          if (record.type === 'error') {
+            throw codexStreamError(record.error ?? record, 'Codex stream error');
           }
         }
+        if (!ended) throw new CodexStreamError('Codex stream ended before the response completed');
         if (textStarted) controller.enqueue({ type: 'text-end', id: 'text-0' });
         controller.enqueue({ type: 'finish', usage: finalUsage, finishReason: finalReason });
         controller.close();

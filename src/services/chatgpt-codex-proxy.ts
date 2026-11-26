@@ -1,7 +1,7 @@
 import type { LanguageModelV3CallOptions, LanguageModelV3Prompt, LanguageModelV3StreamPart } from '@ai-sdk/provider';
-import { HttpError } from '../lib/errors.js';
+import { buildApiError, HttpError } from '../lib/errors.js';
 import { randomUUID } from 'node:crypto';
-import { createChatGPTCodexProvider } from '../providers/chatgpt-codex/provider.js';
+import { CodexStreamError, createChatGPTCodexProvider } from '../providers/chatgpt-codex/provider.js';
 import { getFreshChatGPTCodexCredentials } from './chatgpt-codex-auth.js';
 import type { ForwardResult } from './proxy.js';
 import { settingsError, validateCodexSettings } from './model-capabilities.js';
@@ -279,6 +279,16 @@ function usageToOpenAI(usage: {
   };
 }
 
+/**
+ * An OpenAI streaming error chunk. OpenAI-compatible clients (the AI SDK
+ * among them) read it as a failed response.
+ */
+function errorChunk(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = error instanceof CodexStreamError ? error.code : undefined;
+  return `data: ${JSON.stringify(buildApiError(message, 'api_error', code))}\n\n`;
+}
+
 function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPath: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
@@ -288,10 +298,18 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
       const reader = stream.getReader();
       let emittedToolCall = false;
       let toolCallIndex = 0;
+      // An upstream failure ends the response with an error chunk instead
+      // of a finish, so the client never mistakes it for a finished answer.
+      let failed = false;
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (value.type === 'error') {
+            failed = true;
+            controller.enqueue(encoder.encode(errorChunk(value.error)));
+            break;
+          }
           if (value.type === 'reasoning-delta' || value.type === 'reasoning-end') {
             const delta = value.type === 'reasoning-delta' ? { reasoning_content: value.delta }
               : { codex_reasoning: value.providerMetadata?.['chatgpt-codex']?.reasoningItems ?? [] };
@@ -374,13 +392,13 @@ function toOpenAISSE(stream: ReadableStream<LanguageModelV3StreamPart>, modelPat
             );
           }
         }
-        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-        controller.close();
       } catch (error) {
-        controller.error(error);
+        if (!failed) controller.enqueue(encoder.encode(errorChunk(error)));
       } finally {
         reader.releaseLock();
       }
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
     },
   });
 }

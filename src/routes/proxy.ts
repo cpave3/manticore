@@ -250,6 +250,8 @@ async function handleStreamingResponse(c: any, ctx: StreamContext) {
     total_tokens?: number;
   } | null = null;
   let logWritten = false;
+  // Set when the stream carried an error chunk: the upstream failed partway.
+  let streamError: string | null = null;
 
   function finalizeLog(status: 'success' | 'cancelled' | 'error') {
     if (logWritten) return;
@@ -276,7 +278,7 @@ async function handleStreamingResponse(c: any, ctx: StreamContext) {
         finishReason,
         status,
         statusCode: forwardResult.status,
-        errorMessage: status === 'error' ? 'Upstream returned non-2xx or stream error' : null,
+        errorMessage: status === 'error' ? (streamError ?? 'Upstream returned non-2xx or stream error') : null,
         startTime,
       })
     );
@@ -300,6 +302,10 @@ async function handleStreamingResponse(c: any, ctx: StreamContext) {
 
     try {
       const json = JSON.parse(payload) as Record<string, unknown>;
+      if (json.error && typeof json.error === 'object') {
+        const message = (json.error as Record<string, unknown>).message;
+        streamError = typeof message === 'string' && message ? message : 'Upstream stream error';
+      }
       if (json.usage && typeof json.usage === 'object') {
         const u = json.usage as Record<string, unknown>;
         upstreamUsage = {
@@ -371,7 +377,7 @@ async function handleStreamingResponse(c: any, ctx: StreamContext) {
           processEvent(buffer);
         }
         controller.close();
-        finalizeLog('success');
+        finalizeLog(streamError ? 'error' : 'success');
       } catch (e: unknown) {
         if (!aborted) {
           finalizeLog('error');
