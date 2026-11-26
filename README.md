@@ -59,6 +59,40 @@ curl -s -X POST http://localhost:3456/api/upstreams \
 
 ---
 
+## OpenCode Go as an OpenAI-compatible upstream
+
+Register Go's subscription endpoint as an ordinary upstream (not pay-as-you-go Console).
+The key value is stored on the upstream record, like other OpenAI-compatible keys:
+
+```bash
+# OPENCODE_GO_API_KEY is a shell variable holding your key, not a stored reference.
+pnpm cli upstreams create go https://opencode.ai/inference/go/openai/v1 \
+  --api-key "$OPENCODE_GO_API_KEY" \
+  --header 'x-opencode-session={sessionId}' \
+  --header 'User-Agent=manticore'
+pnpm cli model-mappings create go-kimi go kimi-k3
+```
+
+Alternatively, use Dashboard → Upstreams with the same base URL and API key, and
+Headers JSON `{"x-opencode-session":"{sessionId}","User-Agent":"manticore"}`.
+`kimi-k3` is a model example in the [vendor Go docs](https://opencode.ai/docs/go);
+check current availability before using it.
+
+A custom header whose **entire value** is `{sessionId}` is filled from the caller's
+existing `X-Session-Id` (trimmed, capped at 1024 characters). Reuse one ID across
+turns/retries, and use different IDs for independent conversations. Missing/blank
+IDs return HTTP 400: `Upstream 'go' requires X-Session-Id: send a stable conversation ID`.
+Fixed header values are unchanged; no fallback identity is generated.
+
+In Chimera's existing Manticore provider configuration, merge
+`"headers": {"X-Session-Id":"{{session.id}}"}` (Chimera does not add it automatically).
+Keep its Manticore URL and Client key, then select `chimera -m manticore/go-kimi`.
+Chimera's `{{session.id}}` expands to its existing conversation identity; Manticore
+then remaps it to Go's `x-opencode-session` using `{sessionId}`. No live Go account
+smoke test has been performed.
+
+---
+
 ## ChatGPT Codex authentication
 
 Manticore can route to Codex models through your ChatGPT Plus/Pro/Teams subscription using ChatGPT OAuth. This is separate from OpenAI Platform API keys.

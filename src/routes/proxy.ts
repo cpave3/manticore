@@ -150,6 +150,7 @@ app.post('/chat/completions', async (c) => {
             modelPath,
             requestBody: body,
             isStream,
+            sessionId: c.var.sessionId,
           });
   } catch (err: unknown) {
     if (err instanceof HttpError && err.status === 400) return c.json(err.toJson(), 400);
