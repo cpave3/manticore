@@ -90,17 +90,18 @@ function isUndiscoverable(upstream: RawUpstream): boolean {
 }
 
 /**
- * Limits for one model path behind one upstream. A cold identity blocks on a
- * single catalogue fetch so the first caller sees real data; once data is
- * cached, a stale identity refreshes in the background and the last known
- * values are served.
+ * Limits for one model path behind one upstream. A request with nothing
+ * fresh to serve (a cold identity, an unseen model path, or a discovery past
+ * its max verified age) blocks on a single catalogue fetch so the caller
+ * gets real data; once fresh values exist, refreshes run behind the response
+ * while the last known values are served.
  */
 export async function getModelLimits(
   upstream: RawUpstream,
   modelPath: string
 ): Promise<ModelLimitsDescriptor> {
   if (isUndiscoverable(upstream)) return unknownLimits();
-  const entry = await ensureCatalogue(upstream);
+  const entry = await ensureCatalogue(upstream, modelPath);
   const model = entry.models.get(modelPath);
   if (!model) return unknownLimits();
   return serveModelLimits(model, Date.now());
@@ -122,7 +123,7 @@ export async function getUpstreamCatalogue(
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-async function ensureCatalogue(upstream: RawUpstream): Promise<CatalogueEntry> {
+async function ensureCatalogue(upstream: RawUpstream, modelPath?: string): Promise<CatalogueEntry> {
   const identity = upstreamIdentity(upstream);
   let entry = cache.get(identity);
   if (!entry) {
@@ -131,19 +132,32 @@ async function ensureCatalogue(upstream: RawUpstream): Promise<CatalogueEntry> {
     cache.set(identity, entry);
   }
   if (Date.now() - entry.lastAttemptAt >= DISCOVERY_CACHE_CONSTANTS.refreshIntervalMs) {
-    if (entry.models.size === 0) {
-      // Nothing verified yet: the caller waits for the single-flight fetch.
+    if (nothingFreshFor(entry, modelPath)) {
+      // Nothing to serve for this request: the caller waits for the fetch.
       await refreshEntry(entry, upstream);
     } else {
-      // Last known values exist: refresh behind the response.
+      // Fresh values exist: refresh behind the response.
       void refreshEntry(entry, upstream);
     }
-  } else if (entry.inflight && entry.models.size === 0) {
-    // Within the throttle window, but the first fetch is still running and
-    // there is nothing to serve yet: wait for it instead of answering unknown.
+  } else if (entry.inflight && nothingFreshFor(entry, modelPath)) {
+    // Within the throttle window, but a fetch is still running that could
+    // produce data this request has none of: wait for it.
     await entry.inflight;
   }
   return entry;
+}
+
+/**
+ * Whether a request for `modelPath` has anything fresh to serve. The bulk
+ * catalogue listing (no model path) only ever waits on a completely empty
+ * identity; per-model requests also wait when their own values are absent or
+ * past the max verified age.
+ */
+function nothingFreshFor(entry: CatalogueEntry, modelPath?: string): boolean {
+  if (modelPath === undefined) return entry.models.size === 0;
+  const model = entry.models.get(modelPath);
+  if (!model) return true;
+  return !hasFreshField(model, Date.now());
 }
 
 function refreshEntry(entry: CatalogueEntry, upstream: RawUpstream): Promise<void> {
