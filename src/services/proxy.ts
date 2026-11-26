@@ -1,4 +1,5 @@
 import type { RawUpstream } from './upstreams.js';
+import { HttpError } from '../lib/errors.js';
 
 export type ForwardResult = {
   headers: Headers;
@@ -11,11 +12,13 @@ export async function forward({
   modelPath,
   requestBody,
   isStream,
+  sessionId,
 }: {
   upstream: RawUpstream;
   modelPath: string;
   requestBody: Record<string, unknown>;
   isStream: boolean;
+  sessionId?: string | null;
 }): Promise<ForwardResult> {
   if (!upstream.baseUrl) {
     throw new Error(`Upstream '${upstream.name}' does not have an OpenAI-compatible base URL`);
@@ -32,7 +35,18 @@ export async function forward({
   }
   if (upstream.headers) {
     for (const [key, value] of Object.entries(upstream.headers)) {
-      headers.set(key, value);
+      if (value === '{sessionId}') {
+        if (!sessionId) {
+          throw new HttpError({
+            status: 400,
+            type: 'invalid_request_error',
+            message: `Upstream '${upstream.name}' requires X-Session-Id: send a stable conversation ID`,
+          });
+        }
+        headers.set(key, sessionId);
+      } else {
+        headers.set(key, value);
+      }
     }
   }
 
