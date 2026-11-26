@@ -2,8 +2,15 @@ import { Hono } from 'hono';
 import { apiKeyAuth } from '../middleware/auth.js';
 import { extractSessionId } from '../middleware/session.js';
 import type { RawUpstream } from '../services/upstreams.js';
+import { listRawUpstreams } from '../services/upstreams.js';
+import { listMappings } from '../services/model-mappings.js';
 import { resolveRoute } from '../services/resolve-route.js';
 import { describeModelCapabilities } from '../services/model-capabilities.js';
+import {
+  getModelLimits,
+  getUpstreamCatalogue,
+  type ModelLimitsDescriptor,
+} from '../services/model-discovery.js';
 import { forward, type ForwardResult } from '../services/proxy.js';
 import { forwardChatGPTCodex } from '../services/chatgpt-codex-proxy.js';
 import { buildLogRecord, writeLogRecord } from '../services/logging.js';
@@ -50,8 +57,15 @@ app.onError((err, c) => {
 app.use('/chat/completions', apiKeyAuth(), extractSessionId());
 app.use('/model-capabilities', apiKeyAuth());
 app.use('/models', apiKeyAuth());
-app.get('/models', (c) => {
-  return c.json({ object: 'list', data: [] });
+app.get('/models', async (c) => {
+  const [aliasEntries, directEntries] = await Promise.all([
+    listAliasEntries(),
+    listDirectEntries(),
+  ]);
+  const data = [...aliasEntries, ...directEntries].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  );
+  return c.json({ object: 'list', data });
 });
 app.get('/model-capabilities', (c) => {
   const requestedModel = c.req.query('model');
@@ -228,6 +242,84 @@ app.all('/images/*', (c) => {
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+type ModelsEntry = {
+  id: string;
+  object: 'model';
+  ownedBy: string;
+  modelPath: string;
+  created?: number;
+  limits: ModelLimitsDescriptor;
+};
+
+/**
+ * Alias mappings, listed under their bare abstract name with the route a
+ * chat request would actually take (resolveRoute: lowest priority wins).
+ */
+async function listAliasEntries(): Promise<ModelsEntry[]> {
+  const byName = new Map<string, { createdAt: string }>();
+  for (const mapping of listMappings()) {
+    if (!byName.has(mapping.abstractName)) byName.set(mapping.abstractName, { createdAt: mapping.createdAt });
+  }
+  const routes = [...byName.entries()].map(([name, meta]) => {
+    let route: ReturnType<typeof resolveRoute>;
+    try {
+      route = resolveRoute(name);
+    } catch {
+      return null;
+    }
+    if (!route.upstream) return null;
+    return { name, meta, route };
+  });
+  const resolved = routes.filter((r): r is NonNullable<typeof r> => r !== null);
+  return Promise.all(
+    resolved.map(async ({ name, meta, route }) => {
+      const limits = await getModelLimits(route.upstream!, route.modelPath);
+      const createdSeconds = Math.floor(new Date(meta.createdAt).getTime() / 1000);
+      return {
+        id: name,
+        object: 'model' as const,
+        ownedBy: route.upstream!.name,
+        modelPath: route.modelPath,
+        ...(Number.isFinite(createdSeconds) ? { created: createdSeconds } : {}),
+        limits,
+      };
+    })
+  );
+}
+
+/** Models discovered in each upstream's catalogue, as direct `{provider}/{model}` routes. */
+async function listDirectEntries(): Promise<ModelsEntry[]> {
+  const perUpstream = await Promise.all(
+    listRawUpstreams().map(async (upstream) => {
+      const catalogue = await getUpstreamCatalogue(upstream);
+      if (!catalogue) return [];
+      return catalogue.flatMap((model) => {
+        const publicId = `${upstream.name}/${model.id}`;
+        // List the direct spelling only when it actually routes there — a
+        // mapping named "{provider}/{model}" would intercept it.
+        let route: ReturnType<typeof resolveRoute>;
+        try {
+          route = resolveRoute(publicId);
+        } catch {
+          return [];
+        }
+        if (route.upstream?.id !== upstream.id || route.modelPath !== model.id) return [];
+        return [
+          {
+            id: publicId,
+            object: 'model' as const,
+            ownedBy: upstream.name,
+            modelPath: model.id,
+            ...(model.created !== undefined ? { created: model.created } : {}),
+            limits: model.limits,
+          },
+        ];
+      });
+    })
+  );
+  return perUpstream.flat();
+}
 
 type StreamContext = {
   forwardResult: ForwardResult;

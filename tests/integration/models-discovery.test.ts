@@ -73,3 +73,64 @@ describe('GET /v1/models — client authentication', () => {
 
 // Keep the imported constants referenced so the import stays honest as slices grow.
 void DISCOVERY_CACHE_CONSTANTS;
+
+describe('GET /v1/models — alias limit discovery', () => {
+  it('lists a mapped alias with limits discovered from the upstream catalogue', async () => {
+    await withFreshDb(async () => {
+      const db = getDb();
+      const client = await makeClient(db);
+      const upstream = await makeUpstream(db, {
+        name: 'go',
+        baseUrl: 'https://opencode.ai/inference/go/openai/v1',
+        apiKey: 'go-key',
+        headers: JSON.stringify({
+          'x-opencode-session': '{sessionId}',
+          'User-Agent': 'manticore',
+        }),
+      });
+      const { createMapping } = await import('../../src/services/model-mappings.js');
+      createMapping({ abstractName: 'go-kimi', upstreamId: upstream.id, modelPath: 'kimi-k3' });
+
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse(
+          catalogueBody([
+            {
+              id: 'kimi-k3',
+              object: 'model',
+              created: 1730000000,
+              owned_by: 'opencode',
+              limit: limit(262144, 131072, 32768),
+            },
+          ])
+        )
+      );
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchMock);
+
+      const res = await proxyApp.request('/models', { headers: authHeaders(client) });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.object).toBe('list');
+
+      const alias = body.data.find((m: { id: string }) => m.id === 'go-kimi');
+      expect(alias).toBeDefined();
+      expect(alias.modelPath).toBe('kimi-k3');
+      expect(alias.ownedBy).toBe('go');
+      expect(alias.limits).toEqual({
+        context: { status: 'discovered', value: 262144 },
+        input: { status: 'discovered', value: 131072 },
+        output: { status: 'discovered', value: 32768 },
+      });
+
+      // One catalogue fetch: chat base URL + /models, upstream credential,
+      // static headers forwarded, per-session header omitted.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, { headers: Headers }];
+      expect(url).toBe('https://opencode.ai/inference/go/openai/v1/models');
+      expect(init.method).toBe('GET');
+      const headers = init.headers instanceof Headers ? init.headers : new Headers(init.headers);
+      expect(headers.get('Authorization')).toBe('Bearer go-key');
+      expect(headers.get('User-Agent')).toBe('manticore');
+      expect(headers.get('x-opencode-session')).toBeNull();
+    });
+  });
+});
