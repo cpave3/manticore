@@ -201,6 +201,22 @@ curl -s -X POST http://localhost:3456/v1/chat/completions \
 
 ---
 
+## Model discovery and limits
+
+`GET /v1/models` (Client API key) lists every routable model reference — aliases under their bare abstract name and upstream catalogue models as `{provider}/{model}` — each with `context`/`input`/`output` limits marked `discovered` or `unknown`:
+
+```bash
+curl -s http://localhost:3456/v1/models \
+  -H "authorization: Bearer $MANTICORE_API_KEY"
+# {"object":"list","data":[{"id":"go-kimi","object":"model","ownedBy":"go","modelPath":"kimi-k3",
+#   "limits":{"context":{"status":"discovered","value":262144},"input":{"status":"unknown"},
+#             "output":{"status":"discovered","value":32768}}}, …]}
+```
+
+Limits are fetched from each upstream's own `/models` catalogue with the upstream's credential and cached per upstream identity: one fetch serves requests for five minutes, and a previously verified limit stays usable for at most 24 hours from its last verification. Unshareable per-session headers never enter discovery. `GET /v1/model-capabilities?model=` includes the same `limits` block for its resolved route. See [discovered limits](docs/model-settings.md#discovered-limits).
+
+---
+
 ## Reporting usage Manticore did not proxy
 
 A Client that must call its model provider directly can still have its usage recorded: it reports each request after the fact to `POST /v1/usage`, with its API key. Manticore stores one LogRecord per reported request, attributed to that Client, and shows it in the Dashboard beside proxied requests. Nothing is forwarded and no message content is sent or stored.

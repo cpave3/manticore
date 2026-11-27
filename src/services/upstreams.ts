@@ -52,6 +52,16 @@ export function listUpstreams(): UpstreamResponse[] {
   return rows.map(toUpstreamResponse);
 }
 
+/** All upstreams with full (unmasked) credentials, for proxy-side use such as discovery. */
+export function listRawUpstreams(): RawUpstream[] {
+  const db = getDb();
+  const rows = db.select().from(upstreams).orderBy(upstreams.createdAt).all();
+  return rows.map((row) => ({
+    ...row,
+    headers: row.headers ? (JSON.parse(row.headers) as Record<string, string>) : null,
+  }));
+}
+
 export function deleteUpstream(id: string): void {
   const db = getDb();
   const result = db.delete(upstreams).where(eq(upstreams.id, id)).run();
